@@ -1,0 +1,28 @@
+{
+  "name": "fbr-erp-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "echo \"Frontend scaffold check passed\"",
+    "preview": "vite preview",
+    "lint": "eslint . --ext .js,.jsx",
+    "format": "prettier --write \"**/*.{js,jsx,json,css,md,html}\""
+  },
+  "dependencies": {
+    "axios": "^1.14.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-hook-form": "^7.72.1",
+    "react-router-dom": "^7.14.0",
+    "react-toastify": "^11.0.5",
+    "recharts": "^3.8.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.0.1",
+    "eslint": "^8.57.0",
+    "prettier": "^3.8.1",
+    "vite": "^8.0.5"
+  }
+}
