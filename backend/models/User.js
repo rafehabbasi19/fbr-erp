@@ -22,6 +22,7 @@ module.exports = (sequelize, DataTypes) => {
       is_active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
       email_verified_at: { type: DataTypes.DATE, allowNull: true },
       last_login_at: { type: DataTypes.DATE, allowNull: true },
+      password_changed_at: { type: DataTypes.DATE, allowNull: true },
       failed_attempts: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
       locked_until: { type: DataTypes.DATE, allowNull: true },
     },

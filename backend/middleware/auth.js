@@ -65,6 +65,16 @@ async function requireAuth(req, res, next) {
       })
     }
 
+    if (user.password_changed_at && payload.iat) {
+      const tokenIssuedAtMs = payload.iat * 1000
+      if (tokenIssuedAtMs < new Date(user.password_changed_at).getTime()) {
+        return sendError(res, {
+          statusCode: 401,
+          message: 'Access token is no longer valid. Please log in again.',
+        })
+      }
+    }
+
     req.user = user
     req.authPayload = payload
     req.accessToken = token

@@ -39,6 +39,12 @@ function buildVerificationLink(token) {
   return `${clientUrl}${verifyPath}?token=${encodeURIComponent(token)}`
 }
 
+function buildPasswordResetLink(token, email) {
+  const clientUrl = (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/$/, '')
+  const resetPath = process.env.PASSWORD_RESET_PATH || '/reset-password'
+  return `${clientUrl}${resetPath}?token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`
+}
+
 async function sendVerificationEmail({ to, name, token }) {
   const verificationLink = buildVerificationLink(token)
   const activeTransporter = getTransporter()
@@ -88,6 +94,54 @@ async function sendVerificationEmail({ to, name, token }) {
   }
 }
 
+async function sendPasswordResetEmail({ to, name, token }) {
+  const resetLink = buildPasswordResetLink(token, to)
+  const activeTransporter = getTransporter()
+
+  if (!activeTransporter) {
+    console.info(`[MailService] SMTP not configured. Password reset link for ${to}: ${resetLink}`)
+
+    return {
+      skipped: true,
+      previewUrl: resetLink,
+    }
+  }
+
+  const from =
+    process.env.MAIL_FROM ||
+    process.env.SMTP_FROM ||
+    process.env.SMTP_USER ||
+    process.env.MAIL_USER ||
+    'no-reply@fbr.local'
+
+  const info = await activeTransporter.sendMail({
+    from,
+    to,
+    subject: 'Reset your password',
+    text: [
+      `Hi ${name},`,
+      '',
+      'You requested a password reset. Open this link to continue:',
+      resetLink,
+      '',
+      'This link expires in 1 hour.',
+    ].join('\n'),
+    html: `
+      <p>Hi ${name},</p>
+      <p>You requested a password reset. Click the link below to continue:</p>
+      <p><a href="${resetLink}">${resetLink}</a></p>
+      <p>This link expires in 1 hour.</p>
+    `,
+  })
+
+  return {
+    skipped: false,
+    messageId: info.messageId,
+    previewUrl: resetLink,
+  }
+}
+
 module.exports = {
   sendVerificationEmail,
+  sendPasswordResetEmail,
 }

@@ -9,7 +9,7 @@ const { v4: uuidv4 } = require('uuid')
 
 const { sendSuccess, sendError } = require('../utils/response')
 const AuditLogger = require('../utils/auditLogger')
-const { sendVerificationEmail } = require('../services/mailService')
+const { sendVerificationEmail, sendPasswordResetEmail } = require('../services/mailService')
 const {
   sequelize,
   Company,
@@ -17,11 +17,13 @@ const {
   Role,
   RoleUser,
   RefreshToken,
+  PasswordResetToken,
   EmailVerificationToken,
   AccessTokenBlacklist,
 } = require('../models')
 
 const EMAIL_VERIFICATION_EXPIRY_MS = 24 * 60 * 60 * 1000
+const PASSWORD_RESET_EXPIRY_MS = 60 * 60 * 1000
 const RESEND_LIMIT_PER_HOUR = 3
 const BCRYPT_COST = 12
 const MAX_FAILED_ATTEMPTS = 5
@@ -774,6 +776,175 @@ async function logout(req, res, next) {
   }
 }
 
+async function forgotPassword(req, res, next) {
+  const errors = validationErrors(req)
+
+  if (errors) {
+    return sendError(res, {
+      statusCode: 422,
+      message: 'Validation failed',
+      errors,
+    })
+  }
+
+  const normalizedEmail = normalizeEmail(req.body.email)
+  const genericMessage = 'If an account with that email exists, a password reset link has been sent.'
+
+  try {
+    const user = await User.findOne({ where: { email: normalizedEmail } })
+
+    if (user) {
+      const rawToken = uuidv4()
+      const tokenHash = hashToken(rawToken)
+      const expiresAt = new Date(Date.now() + PASSWORD_RESET_EXPIRY_MS)
+
+      const transaction = await sequelize.transaction()
+
+      try {
+        await PasswordResetToken.destroy({
+          where: { email: normalizedEmail },
+          transaction,
+        })
+
+        await PasswordResetToken.create(
+          {
+            email: normalizedEmail,
+            token_hash: tokenHash,
+            expires_at: expiresAt,
+          },
+          { transaction }
+        )
+
+        await transaction.commit()
+      } catch (error) {
+        await transaction.rollback()
+        throw error
+      }
+
+      try {
+        await sendPasswordResetEmail({
+          to: normalizedEmail,
+          name: user.name,
+          token: rawToken,
+        })
+      } catch (mailError) {
+        console.warn('[Auth] Password reset email failed:', mailError.message)
+      }
+
+      await AuditLogger.log({
+        company_id: user.company_id,
+        user_id: user.id,
+        action: 'AUTH_PASSWORD_RESET_REQUESTED',
+        entity_type: 'User',
+        entity_id: user.id,
+        ip_address: req.ip || null,
+      })
+    }
+
+    return sendSuccess(res, {
+      data: null,
+      message: genericMessage,
+    })
+  } catch (err) {
+    return next(err)
+  }
+}
+
+async function resetPassword(req, res, next) {
+  const errors = validationErrors(req)
+
+  if (errors) {
+    return sendError(res, {
+      statusCode: 422,
+      message: 'Validation failed',
+      errors,
+    })
+  }
+
+  const normalizedEmail = normalizeEmail(req.body.email)
+  const tokenHash = hashToken(req.body.token)
+
+  try {
+    const tokenRow = await PasswordResetToken.findOne({
+      where: {
+        email: normalizedEmail,
+        token_hash: tokenHash,
+        expires_at: { [Op.gt]: new Date() },
+      },
+    })
+
+    if (!tokenRow) {
+      return sendError(res, {
+        statusCode: 400,
+        message: 'Invalid or expired password reset token',
+      })
+    }
+
+    const transaction = await sequelize.transaction()
+
+    let user
+
+    try {
+      user = await User.scope('withPassword').findOne({
+        where: { email: normalizedEmail },
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      })
+
+      if (!user) {
+        await transaction.rollback()
+        return sendError(res, {
+          statusCode: 404,
+          message: 'User not found for this password reset request',
+        })
+      }
+
+      user.password_hash = await bcrypt.hash(req.body.password, BCRYPT_COST)
+      user.failed_attempts = 0
+      user.locked_until = null
+      user.password_changed_at = new Date()
+      await user.save({ transaction })
+
+      await PasswordResetToken.destroy({
+        where: { email: normalizedEmail },
+        transaction,
+      })
+
+      await RefreshToken.update(
+        { revoked: true },
+        {
+          where: {
+            user_id: user.id,
+            revoked: false,
+          },
+          transaction,
+        }
+      )
+
+      await transaction.commit()
+    } catch (error) {
+      await transaction.rollback()
+      throw error
+    }
+
+    await AuditLogger.log({
+      company_id: user.company_id,
+      user_id: user.id,
+      action: 'AUTH_PASSWORD_RESET_COMPLETED',
+      entity_type: 'User',
+      entity_id: user.id,
+      ip_address: req.ip || null,
+    })
+
+    return sendSuccess(res, {
+      data: null,
+      message: 'Password has been reset successfully. Please log in again.',
+    })
+  } catch (err) {
+    return next(err)
+  }
+}
+
 module.exports = {
   register,
   verifyEmail,
@@ -781,4 +952,6 @@ module.exports = {
   login,
   refresh,
   logout,
+  forgotPassword,
+  resetPassword,
 }

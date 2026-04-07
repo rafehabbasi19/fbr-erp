@@ -108,4 +108,48 @@ router.post(
   authController.logout
 )
 
+router.post(
+  '/forgot-password',
+  [
+    body('email')
+      .trim()
+      .notEmpty()
+      .withMessage('Email is required')
+      .isEmail()
+      .withMessage('Email must be valid')
+      .normalizeEmail(),
+  ],
+  authController.forgotPassword
+)
+
+router.post(
+  '/reset-password',
+  [
+    body('token')
+      .trim()
+      .notEmpty()
+      .withMessage('Reset token is required')
+      .isUUID()
+      .withMessage('Reset token must be a valid UUID'),
+    body('email')
+      .trim()
+      .notEmpty()
+      .withMessage('Email is required')
+      .isEmail()
+      .withMessage('Email must be valid')
+      .normalizeEmail(),
+    body('password')
+      .notEmpty()
+      .withMessage('Password is required')
+      .isLength({ min: 8 })
+      .withMessage('Password must be at least 8 characters'),
+    body('password_confirmation')
+      .notEmpty()
+      .withMessage('Password confirmation is required')
+      .custom((value, { req }) => value === req.body.password)
+      .withMessage('Password confirmation does not match'),
+  ],
+  authController.resetPassword
+)
+
 module.exports = router
