@@ -17,7 +17,7 @@ router.get('/', (req, res) => {
 })
 
 // ─── Module Routes (to be mounted in Phase 2+) ────────────────────────────
-// router.use('/auth',           require('./auth.routes'))
+router.use('/auth', require('./auth.routes'))
 // router.use('/companies',      require('./company.routes'))
 // router.use('/clients',        require('./client.routes'))
 // router.use('/invoices',       require('./invoice.routes'))
