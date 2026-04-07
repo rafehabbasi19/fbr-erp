@@ -4,6 +4,7 @@ const { Router } = require('express')
 const { body, param } = require('express-validator')
 
 const authController = require('../controllers/authController')
+const { requireAuth } = require('../middleware/auth')
 
 const router = Router()
 
@@ -63,6 +64,48 @@ router.post(
       .normalizeEmail(),
   ],
   authController.resendVerification
+)
+
+router.post(
+  '/login',
+  [
+    body('email')
+      .trim()
+      .notEmpty()
+      .withMessage('Email is required')
+      .isEmail()
+      .withMessage('Email must be valid')
+      .normalizeEmail(),
+    body('password').notEmpty().withMessage('Password is required'),
+  ],
+  authController.login
+)
+
+router.post(
+  '/refresh',
+  [
+    body('refresh_token')
+      .trim()
+      .notEmpty()
+      .withMessage('Refresh token is required')
+      .isString()
+      .withMessage('Refresh token must be a string'),
+  ],
+  authController.refresh
+)
+
+router.post(
+  '/logout',
+  requireAuth,
+  [
+    body('refresh_token')
+      .trim()
+      .notEmpty()
+      .withMessage('Refresh token is required')
+      .isString()
+      .withMessage('Refresh token must be a string'),
+  ],
+  authController.logout
 )
 
 module.exports = router

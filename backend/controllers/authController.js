@@ -2,6 +2,7 @@
 
 const crypto = require('crypto')
 const bcrypt = require('bcryptjs')
+const jwt = require('jsonwebtoken')
 const { validationResult } = require('express-validator')
 const { Op } = require('sequelize')
 const { v4: uuidv4 } = require('uuid')
@@ -15,12 +16,44 @@ const {
   User,
   Role,
   RoleUser,
+  RefreshToken,
   EmailVerificationToken,
+  AccessTokenBlacklist,
 } = require('../models')
 
 const EMAIL_VERIFICATION_EXPIRY_MS = 24 * 60 * 60 * 1000
 const RESEND_LIMIT_PER_HOUR = 3
 const BCRYPT_COST = 12
+const MAX_FAILED_ATTEMPTS = 5
+const ACCOUNT_LOCKOUT_WINDOW_MS = 15 * 60 * 1000
+
+function parseDurationToSeconds(durationValue, fallbackSeconds) {
+  const value = String(durationValue || '').trim()
+  const match = value.match(/^(\d+)([smhd])$/i)
+
+  if (!match) {
+    return fallbackSeconds
+  }
+
+  const quantity = Number(match[1])
+  const unit = match[2].toLowerCase()
+  const unitSeconds = {
+    s: 1,
+    m: 60,
+    h: 60 * 60,
+    d: 24 * 60 * 60,
+  }
+
+  return quantity * unitSeconds[unit]
+}
+
+const ACCESS_TOKEN_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '2h'
+const ACCESS_TOKEN_EXPIRES_SECONDS = parseDurationToSeconds(ACCESS_TOKEN_EXPIRES_IN, 2 * 60 * 60)
+const REFRESH_TOKEN_EXPIRES_IN = process.env.REFRESH_TOKEN_EXPIRES_IN || '30d'
+const REFRESH_TOKEN_EXPIRES_SECONDS = parseDurationToSeconds(
+  REFRESH_TOKEN_EXPIRES_IN,
+  30 * 24 * 60 * 60
+)
 
 function hashToken(rawToken) {
   return crypto.createHash('sha256').update(rawToken).digest('hex')
@@ -52,6 +85,63 @@ function sanitizeUser(user) {
   const safeUser = { ...plain }
   delete safeUser.password_hash
   return safeUser
+}
+
+function getJwtSecret() {
+  const jwtSecret = process.env.JWT_SECRET
+
+  if (!jwtSecret) {
+    const error = new Error('JWT secret is not configured')
+    error.statusCode = 500
+    throw error
+  }
+
+  return jwtSecret
+}
+
+function buildAccessTokenPayload(user) {
+  return {
+    sub: user.id,
+    company_id: user.company_id,
+    role: user.role,
+  }
+}
+
+function createAccessToken(user) {
+  return jwt.sign(buildAccessTokenPayload(user), getJwtSecret(), {
+    expiresIn: ACCESS_TOKEN_EXPIRES_IN,
+  })
+}
+
+async function createRefreshToken(user, transaction = null) {
+  const rawToken = crypto.randomBytes(48).toString('hex')
+  const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRES_SECONDS * 1000)
+
+  await RefreshToken.create(
+    {
+      user_id: user.id,
+      token_hash: hashToken(rawToken),
+      expires_at: expiresAt,
+      revoked: false,
+    },
+    transaction ? { transaction } : undefined
+  )
+
+  return {
+    rawToken,
+    expiresAt,
+  }
+}
+
+async function issueTokenPair(user, transaction = null) {
+  const accessToken = createAccessToken(user)
+  const { rawToken } = await createRefreshToken(user, transaction)
+
+  return {
+    accessToken,
+    refreshToken: rawToken,
+    expiresIn: ACCESS_TOKEN_EXPIRES_SECONDS,
+  }
 }
 
 async function register(req, res, next) {
@@ -395,8 +485,300 @@ async function resendVerification(req, res, next) {
   }
 }
 
+async function login(req, res, next) {
+  const errors = validationErrors(req)
+
+  if (errors) {
+    return sendError(res, {
+      statusCode: 422,
+      message: 'Validation failed',
+      errors,
+    })
+  }
+
+  const normalizedEmail = normalizeEmail(req.body.email)
+  const userAgent = req.get('user-agent') || null
+
+  try {
+    const user = await User.scope('withPassword').findOne({
+      where: { email: normalizedEmail },
+    })
+
+    if (!user) {
+      return sendError(res, {
+        statusCode: 401,
+        message: 'Invalid email or password',
+      })
+    }
+
+    if (!user.is_active) {
+      return sendError(res, {
+        statusCode: 403,
+        message: 'Account is inactive',
+      })
+    }
+
+    if (!user.email_verified_at) {
+      return sendError(res, {
+        statusCode: 403,
+        message: 'Email must be verified before login',
+      })
+    }
+
+    if (user.locked_until && user.locked_until > new Date()) {
+      return sendError(res, {
+        statusCode: 423,
+        message: 'Account is temporarily locked. Please try again later.',
+        errors: [
+          {
+            code: 'ACCOUNT_LOCKED',
+            message: 'Too many failed login attempts',
+          },
+        ],
+      })
+    }
+
+    const passwordMatches = await bcrypt.compare(req.body.password, user.password_hash)
+
+    if (!passwordMatches) {
+      const nextFailedAttempts = (user.failed_attempts || 0) + 1
+      const shouldLockAccount = nextFailedAttempts >= MAX_FAILED_ATTEMPTS
+
+      user.failed_attempts = nextFailedAttempts
+      user.locked_until = shouldLockAccount
+        ? new Date(Date.now() + ACCOUNT_LOCKOUT_WINDOW_MS)
+        : null
+      await user.save()
+
+      await AuditLogger.log({
+        company_id: user.company_id,
+        user_id: user.id,
+        action: 'AUTH_LOGIN_FAILED',
+        entity_type: 'User',
+        entity_id: user.id,
+        new_values: {
+          failed_attempts: user.failed_attempts,
+          user_agent: userAgent,
+        },
+        ip_address: req.ip || null,
+      })
+
+      if (shouldLockAccount) {
+        return sendError(res, {
+          statusCode: 423,
+          message: 'Account locked for 15 minutes after repeated failed attempts',
+        })
+      }
+
+      return sendError(res, {
+        statusCode: 401,
+        message: 'Invalid email or password',
+      })
+    }
+
+    user.failed_attempts = 0
+    user.locked_until = null
+    user.last_login_at = new Date()
+    await user.save()
+
+    const { accessToken, refreshToken, expiresIn } = await issueTokenPair(user)
+
+    await AuditLogger.log({
+      company_id: user.company_id,
+      user_id: user.id,
+      action: 'AUTH_LOGIN_SUCCESS',
+      entity_type: 'User',
+      entity_id: user.id,
+      new_values: {
+        last_login_at: user.last_login_at,
+        user_agent: userAgent,
+      },
+      ip_address: req.ip || null,
+    })
+
+    return sendSuccess(res, {
+      data: {
+        user: sanitizeUser(user),
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        expires_in: expiresIn,
+      },
+      message: 'Login successful',
+    })
+  } catch (err) {
+    return next(err)
+  }
+}
+
+async function refresh(req, res, next) {
+  const errors = validationErrors(req)
+
+  if (errors) {
+    return sendError(res, {
+      statusCode: 422,
+      message: 'Validation failed',
+      errors,
+    })
+  }
+
+  const userAgent = req.get('user-agent') || null
+  const refreshTokenHash = hashToken(req.body.refresh_token)
+
+  try {
+    const refreshTokenRow = await RefreshToken.findOne({
+      where: {
+        token_hash: refreshTokenHash,
+        revoked: false,
+        expires_at: { [Op.gt]: new Date() },
+      },
+    })
+
+    if (!refreshTokenRow) {
+      return sendError(res, {
+        statusCode: 401,
+        message: 'Invalid or expired refresh token',
+      })
+    }
+
+    const user = await User.scope('withPassword').findByPk(refreshTokenRow.user_id)
+
+    if (!user || !user.is_active) {
+      return sendError(res, {
+        statusCode: 401,
+        message: 'Invalid authentication context',
+      })
+    }
+
+    if (!user.email_verified_at) {
+      return sendError(res, {
+        statusCode: 403,
+        message: 'Email must be verified before requesting new tokens',
+      })
+    }
+
+    const transaction = await sequelize.transaction()
+
+    let tokenPair
+
+    try {
+      await refreshTokenRow.update(
+        {
+          revoked: true,
+        },
+        { transaction }
+      )
+
+      tokenPair = await issueTokenPair(user, transaction)
+      await transaction.commit()
+    } catch (error) {
+      await transaction.rollback()
+      throw error
+    }
+
+    await AuditLogger.log({
+      company_id: user.company_id,
+      user_id: user.id,
+      action: 'AUTH_TOKEN_REFRESHED',
+      entity_type: 'User',
+      entity_id: user.id,
+      new_values: {
+        user_agent: userAgent,
+      },
+      ip_address: req.ip || null,
+    })
+
+    return sendSuccess(res, {
+      data: {
+        access_token: tokenPair.accessToken,
+        refresh_token: tokenPair.refreshToken,
+        expires_in: tokenPair.expiresIn,
+      },
+      message: 'Access token refreshed successfully',
+    })
+  } catch (err) {
+    return next(err)
+  }
+}
+
+async function logout(req, res, next) {
+  const errors = validationErrors(req)
+
+  if (errors) {
+    return sendError(res, {
+      statusCode: 422,
+      message: 'Validation failed',
+      errors,
+    })
+  }
+
+  const user = req.user
+  const userAgent = req.get('user-agent') || null
+
+  try {
+    const transaction = await sequelize.transaction()
+
+    try {
+      if (req.accessToken && req.authPayload && req.authPayload.exp) {
+        const currentTokenHash = hashToken(req.accessToken)
+        const expiresAt = new Date(req.authPayload.exp * 1000)
+
+        await AccessTokenBlacklist.findOrCreate({
+          where: {
+            token_hash: currentTokenHash,
+          },
+          defaults: {
+            user_id: user.id,
+            token_hash: currentTokenHash,
+            expires_at: expiresAt,
+          },
+          transaction,
+        })
+      }
+
+      await RefreshToken.update(
+        { revoked: true },
+        {
+          where: {
+            user_id: user.id,
+            token_hash: hashToken(req.body.refresh_token),
+            revoked: false,
+          },
+          transaction,
+        }
+      )
+
+      await transaction.commit()
+    } catch (error) {
+      await transaction.rollback()
+      throw error
+    }
+
+    await AuditLogger.log({
+      company_id: user.company_id,
+      user_id: user.id,
+      action: 'AUTH_LOGOUT',
+      entity_type: 'User',
+      entity_id: user.id,
+      new_values: {
+        user_agent: userAgent,
+      },
+      ip_address: req.ip || null,
+    })
+
+    return sendSuccess(res, {
+      data: null,
+      message: 'Logged out successfully',
+    })
+  } catch (err) {
+    return next(err)
+  }
+}
+
 module.exports = {
   register,
   verifyEmail,
   resendVerification,
+  login,
+  refresh,
+  logout,
 }
