@@ -186,7 +186,7 @@ async function getSummary(req, res, next) {
   const nowStr = toDateOnlyString(now)
   const summaryCacheKey = buildDashboardSummaryCacheKey(user)
 
-  const cachedSummary = getDashboardSummaryCache(summaryCacheKey)
+  const cachedSummary = await getDashboardSummaryCache(summaryCacheKey)
   if (cachedSummary) {
     return sendSuccess(res, {
       data: cachedSummary,
@@ -306,7 +306,7 @@ async function getSummary(req, res, next) {
       fbr_pending_submissions: fbrPendingSubmissions,
     }
 
-    setDashboardSummaryCache(summaryCacheKey, summaryData)
+    await setDashboardSummaryCache(summaryCacheKey, summaryData)
 
     return sendSuccess(res, {
       data: summaryData,

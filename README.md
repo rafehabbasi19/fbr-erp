@@ -15,6 +15,7 @@ A secure, web-based platform for Pakistani SMEs to create digital invoices, vali
 | Frontend | React (Vite), React Router v6, Axios, Tailwind CSS, Recharts |
 | Backend | Node.js, Express.js |
 | Database | PostgreSQL (Docker) with Sequelize ORM |
+| Cache | Redis (Docker) |
 | Auth | JWT access token (15m) + Refresh token (7d), bcrypt salt 12 |
 | Security | helmet, express-rate-limit, AES-256-GCM encryption |
 | CI/CD | GitHub Actions |
@@ -47,7 +48,7 @@ fbr-erp/                  ← monorepo root
 │       ├── services/
 │       ├── context/
 │       └── utils/
-├── docker-compose.yml    ← Local dev: PostgreSQL + pgAdmin
+├── docker-compose.yml    ← Local dev: PostgreSQL + pgAdmin + Redis
 └── .github/workflows/    ← CI/CD pipelines
 ```
 
@@ -72,7 +73,7 @@ cd backend && npm install
 cd ../frontend && npm install
 ```
 
-### 2. Start PostgreSQL via Docker
+### 2. Start local services via Docker
 
 ```bash
 # From repo root
@@ -80,6 +81,7 @@ docker compose up -d
 
 # pgAdmin available at http://localhost:5050
 # PostgreSQL available at localhost:5433
+# Redis available at localhost:6379
 ```
 
 ### 3. Configure environment
@@ -148,6 +150,12 @@ cd frontend && npm run dev
 | `SMTP_PASS` | SMTP app password | — |
 | `CLIENT_URL` | Frontend URL (for CORS) | `http://localhost:5173` |
 | `CLIENT_URLS` | Additional allowed frontend origins (comma-separated, production) | `https://app.example.com,https://admin.example.com` |
+| `REDIS_ENABLED` | Enable Redis-backed dashboard cache | `true` |
+| `REDIS_URL` | Redis connection URL | `redis://localhost:6379/0` |
+| `REDIS_HOST` | Redis host (used if REDIS_URL is omitted) | `localhost` |
+| `REDIS_PORT` | Redis port (used if REDIS_URL is omitted) | `6379` |
+| `REDIS_DB` | Redis logical DB index | `0` |
+| `REDIS_PASSWORD` | Redis password (optional) | — |
 
 ### Frontend (`frontend/.env`)
 

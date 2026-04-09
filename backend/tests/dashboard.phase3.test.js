@@ -56,10 +56,10 @@ function buildAccessToken(payloadOverrides = {}) {
 }
 
 describe('Dashboard phase 3 APIs', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     jest.clearAllMocks()
     process.env.JWT_SECRET = 'dashboard_phase3_test_secret'
-    clearDashboardSummaryCache()
+    await clearDashboardSummaryCache()
 
     AccessTokenBlacklist.findOne.mockResolvedValue(null)
     User.findByPk.mockResolvedValue({

@@ -36,7 +36,7 @@ module.exports = (sequelize, DataTypes) => {
 
   async function invalidateSummaryCacheByPayment(payment) {
     if (!payment || !payment.invoice_id) {
-      clearDashboardSummaryCache()
+      await clearDashboardSummaryCache()
       return
     }
 
@@ -45,11 +45,11 @@ module.exports = (sequelize, DataTypes) => {
     })
 
     if (!invoice || !invoice.company_id) {
-      clearDashboardSummaryCache()
+      await clearDashboardSummaryCache()
       return
     }
 
-    invalidateDashboardSummaryCacheForCompany(invoice.company_id)
+    await invalidateDashboardSummaryCacheForCompany(invoice.company_id)
   }
 
   Payment.addHook(
@@ -70,16 +70,16 @@ module.exports = (sequelize, DataTypes) => {
     invalidateSummaryCacheByPayment
   )
 
-  Payment.addHook('afterBulkCreate', 'invalidateDashboardSummaryCacheAfterBulkCreatePayment', () => {
-    clearDashboardSummaryCache()
+  Payment.addHook('afterBulkCreate', 'invalidateDashboardSummaryCacheAfterBulkCreatePayment', async () => {
+    await clearDashboardSummaryCache()
   })
 
-  Payment.addHook('afterBulkUpdate', 'invalidateDashboardSummaryCacheAfterBulkUpdatePayment', () => {
-    clearDashboardSummaryCache()
+  Payment.addHook('afterBulkUpdate', 'invalidateDashboardSummaryCacheAfterBulkUpdatePayment', async () => {
+    await clearDashboardSummaryCache()
   })
 
-  Payment.addHook('afterBulkDestroy', 'invalidateDashboardSummaryCacheAfterBulkDestroyPayment', () => {
-    clearDashboardSummaryCache()
+  Payment.addHook('afterBulkDestroy', 'invalidateDashboardSummaryCacheAfterBulkDestroyPayment', async () => {
+    await clearDashboardSummaryCache()
   })
 
   return Payment
