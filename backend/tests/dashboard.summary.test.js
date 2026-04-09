@@ -30,6 +30,7 @@ const {
   Payment,
   FbrSubmission,
 } = require('../models')
+const { clearDashboardSummaryCache } = require('../services/dashboardCacheService')
 
 function buildAccessToken(payloadOverrides = {}) {
   return jwt.sign(
@@ -48,6 +49,7 @@ describe('Dashboard summary API', () => {
   beforeEach(() => {
     jest.clearAllMocks()
     process.env.JWT_SECRET = 'dashboard_test_secret'
+    clearDashboardSummaryCache()
 
     AccessTokenBlacklist.findOne.mockResolvedValue(null)
     User.findByPk.mockResolvedValue({
@@ -109,6 +111,27 @@ describe('Dashboard summary API', () => {
     const paymentIncludeWhere = Payment.sum.mock.calls[0][1].include[0].where
     expect(paymentIncludeWhere.company_id).toBe('d8d85d5a-e53c-4727-a3f2-b4f2f6a3f111')
     expect(paymentIncludeWhere.created_by).toBe('24d3fef8-5a2c-44ca-87f2-4f9544fec111')
+  })
+
+  it('GET /api/v1/dashboard/summary serves repeated requests from cache', async () => {
+    const token = buildAccessToken()
+
+    const first = await request(app)
+      .get('/api/v1/dashboard/summary')
+      .set('Authorization', `Bearer ${token}`)
+
+    const second = await request(app)
+      .get('/api/v1/dashboard/summary')
+      .set('Authorization', `Bearer ${token}`)
+
+    expect(first.statusCode).toBe(200)
+    expect(second.statusCode).toBe(200)
+    expect(second.body.data).toEqual(first.body.data)
+
+    expect(Invoice.count).toHaveBeenCalledTimes(5)
+    expect(Payment.sum).toHaveBeenCalledTimes(3)
+    expect(Invoice.sum).toHaveBeenCalledTimes(1)
+    expect(FbrSubmission.count).toHaveBeenCalledTimes(1)
   })
 
   it('GET /api/v1/dashboard/summary denies roles without view_reports permission', async () => {

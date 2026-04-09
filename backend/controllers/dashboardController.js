@@ -1,9 +1,14 @@
 'use strict'
 
-const { Op } = require('sequelize')
+const { Op, fn, col, literal } = require('sequelize')
 
 const { sendSuccess, sendError } = require('../utils/response')
 const { Invoice, Payment, FbrSubmission, Client, AuditLog, User } = require('../models')
+const {
+  buildDashboardSummaryCacheKey,
+  getDashboardSummaryCache,
+  setDashboardSummaryCache,
+} = require('../services/dashboardCacheService')
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const FBR_SUBMITTED_STATUSES = ['success', 'submitted', 'accepted']
@@ -22,13 +27,16 @@ function toDateOnlyString(date) {
   return date.toISOString().slice(0, 10)
 }
 
-function toMonthKey(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+function readRowValue(row, key) {
+  if (row && typeof row.get === 'function') {
+    return row.get(key)
+  }
+
+  return row ? row[key] : undefined
 }
 
-function toWeekLabel(date) {
-  const weekNumber = Math.floor((date.getDate() - 1) / 7) + 1
-  return `W${weekNumber}`
+function toMonthKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
 }
 
 function roundCurrency(value) {
@@ -176,6 +184,15 @@ async function getSummary(req, res, next) {
   const monthStartStr = toDateOnlyString(monthStart)
   const yearStartStr = toDateOnlyString(yearStart)
   const nowStr = toDateOnlyString(now)
+  const summaryCacheKey = buildDashboardSummaryCacheKey(user)
+
+  const cachedSummary = getDashboardSummaryCache(summaryCacheKey)
+  if (cachedSummary) {
+    return sendSuccess(res, {
+      data: cachedSummary,
+      message: 'Dashboard summary retrieved successfully',
+    })
+  }
 
   try {
     const [
@@ -277,18 +294,22 @@ async function getSummary(req, res, next) {
 
     const outstandingAmount = Math.max(0, toNumber(totalInvoiceAmount) - toNumber(totalPaidAmount))
 
+    const summaryData = {
+      total_invoices: totalInvoices,
+      draft_invoices: draftInvoices,
+      pending_invoices: pendingInvoices,
+      paid_invoices: paidInvoices,
+      overdue_invoices: overdueInvoices,
+      revenue_this_month: toNumber(revenueThisMonth),
+      revenue_this_year: toNumber(revenueThisYear),
+      outstanding_amount: outstandingAmount,
+      fbr_pending_submissions: fbrPendingSubmissions,
+    }
+
+    setDashboardSummaryCache(summaryCacheKey, summaryData)
+
     return sendSuccess(res, {
-      data: {
-        total_invoices: totalInvoices,
-        draft_invoices: draftInvoices,
-        pending_invoices: pendingInvoices,
-        paid_invoices: paidInvoices,
-        overdue_invoices: overdueInvoices,
-        revenue_this_month: toNumber(revenueThisMonth),
-        revenue_this_year: toNumber(revenueThisYear),
-        outstanding_amount: outstandingAmount,
-        fbr_pending_submissions: fbrPendingSubmissions,
-      },
+      data: summaryData,
       message: 'Dashboard summary retrieved successfully',
     })
   } catch (err) {
@@ -314,7 +335,6 @@ async function getRevenueChart(req, res, next) {
   let startDate = null
   let endDate = null
   let buckets = []
-  let bucketResolver = null
 
   if (period === 'weekly') {
     const parsedMonth = parseMonth(req.query.month)
@@ -329,7 +349,6 @@ async function getRevenueChart(req, res, next) {
     startDate = new Date(parsedMonth.year, parsedMonth.monthIndex, 1)
     endDate = new Date(parsedMonth.year, parsedMonth.monthIndex + 1, 0)
     buckets = buildWeekBuckets()
-    bucketResolver = date => toWeekLabel(date)
   } else if (period === 'monthly') {
     const customStart = parseDateValue(req.query.date_from)
     const customEnd = parseDateValue(req.query.date_to)
@@ -355,7 +374,6 @@ async function getRevenueChart(req, res, next) {
     }
 
     buckets = buildMonthlyBuckets(startDate, endDate)
-    bucketResolver = date => toMonthKey(date)
   } else {
     return sendError(res, {
       statusCode: 422,
@@ -364,34 +382,62 @@ async function getRevenueChart(req, res, next) {
   }
 
   try {
-    const invoices = await Invoice.findAll({
-      where: {
-        ...invoiceWhere,
-        invoice_date: {
-          [Op.between]: [toDateOnlyString(startDate), toDateOnlyString(endDate)],
-        },
+    const chartWhere = {
+      ...invoiceWhere,
+      invoice_date: {
+        [Op.between]: [toDateOnlyString(startDate), toDateOnlyString(endDate)],
       },
-      attributes: ['invoice_date', 'total_amount'],
-      order: [['invoice_date', 'ASC']],
-    })
+    }
 
-    const bucketMap = new Map(buckets.map(bucket => [bucket.label.startsWith('W') ? bucket.label : bucket.key, bucket]))
+    let aggregatedRows = []
 
-    invoices.forEach(invoice => {
-      const invoiceDate = new Date(invoice.invoice_date)
-      if (Number.isNaN(invoiceDate.getTime())) {
-        return
-      }
+    if (period === 'weekly') {
+      const weeklyBucketExpression = literal("CEIL(EXTRACT(DAY FROM invoice_date)::numeric / 7)")
 
-      const bucketKey = bucketResolver(invoiceDate)
-      const bucket = bucketMap.get(bucketKey)
+      aggregatedRows = await Invoice.findAll({
+        where: chartWhere,
+        attributes: [
+          [weeklyBucketExpression, 'bucket_number'],
+          [fn('COALESCE', fn('SUM', col('total_amount')), 0), 'revenue'],
+          [fn('COUNT', col('id')), 'invoice_count'],
+        ],
+        group: [weeklyBucketExpression],
+        order: [[weeklyBucketExpression, 'ASC']],
+        raw: true,
+      })
+    } else {
+      const monthlyBucketExpression = fn('TO_CHAR', col('invoice_date'), 'YYYY-MM')
 
+      aggregatedRows = await Invoice.findAll({
+        where: chartWhere,
+        attributes: [
+          [monthlyBucketExpression, 'bucket_key'],
+          [fn('COALESCE', fn('SUM', col('total_amount')), 0), 'revenue'],
+          [fn('COUNT', col('id')), 'invoice_count'],
+        ],
+        group: [monthlyBucketExpression],
+        order: [[monthlyBucketExpression, 'ASC']],
+        raw: true,
+      })
+    }
+
+    const bucketMap = new Map(
+      buckets.map(bucket => [period === 'weekly' ? bucket.label : bucket.key, bucket])
+    )
+
+    aggregatedRows.forEach(row => {
+      const bucketIdentifier =
+        period === 'weekly'
+          ? `W${toNumber(readRowValue(row, 'bucket_number'))}`
+          : String(readRowValue(row, 'bucket_key') || '')
+
+      const bucket = bucketMap.get(bucketIdentifier)
       if (!bucket) {
         return
       }
 
-      bucket.revenue = roundCurrency(bucket.revenue + toNumber(invoice.total_amount))
-      bucket.invoice_count += 1
+      bucket.revenue = roundCurrency(readRowValue(row, 'revenue'))
+      bucket.invoice_count = Number(readRowValue(row, 'invoice_count') || 0)
     })
 
     const data = buckets.map(bucket => ({
@@ -427,72 +473,71 @@ async function getTopClients(req, res, next) {
   const invoiceWhere = scopedInvoiceWhere(user)
   const now = new Date()
   const yearStart = new Date(now.getFullYear(), 0, 1)
+  const yearStartStr = toDateOnlyString(yearStart)
+  const nowStr = toDateOnlyString(now)
 
   try {
-    const invoices = await Invoice.findAll({
+    const billedRows = await Invoice.findAll({
       where: {
         ...invoiceWhere,
+        client_id: {
+          [Op.ne]: null,
+        },
         invoice_date: {
-          [Op.between]: [toDateOnlyString(yearStart), toDateOnlyString(now)],
+          [Op.between]: [yearStartStr, nowStr],
         },
       },
-      attributes: ['id', 'client_id', 'total_amount'],
+      attributes: [
+        'client_id',
+        [fn('COALESCE', fn('SUM', col('total_amount')), 0), 'total_billed'],
+      ],
+      group: ['client_id'],
+      order: [literal('SUM(total_amount) DESC')],
+      limit: 5,
+      raw: true,
     })
 
-    if (!invoices.length) {
+    if (!billedRows.length) {
       return sendSuccess(res, {
         data: [],
         message: 'Dashboard top clients retrieved successfully',
       })
     }
 
-    const totalsByClient = new Map()
-    const invoiceClientMap = new Map()
+    const clientIds = billedRows.map(row => readRowValue(row, 'client_id')).filter(Boolean)
 
-    invoices.forEach(invoice => {
-      if (!invoice.client_id) {
-        return
-      }
+    const paidRows = clientIds.length
+      ? await Payment.findAll({
+          attributes: [
+            [col('invoice.client_id'), 'client_id'],
+            [fn('COALESCE', fn('SUM', col('amount_paid')), 0), 'total_paid'],
+          ],
+          include: [
+            {
+              model: Invoice,
+              as: 'invoice',
+              attributes: [],
+              required: true,
+              where: {
+                ...invoiceWhere,
+                client_id: {
+                  [Op.in]: clientIds,
+                },
+                invoice_date: {
+                  [Op.between]: [yearStartStr, nowStr],
+                },
+              },
+            },
+          ],
+          group: [col('invoice.client_id')],
+          raw: true,
+        })
+      : []
 
-      const current = totalsByClient.get(invoice.client_id) || {
-        client_id: invoice.client_id,
-        total_billed: 0,
-        total_paid: 0,
-      }
+    const paidByClient = new Map(
+      paidRows.map(row => [readRowValue(row, 'client_id'), toNumber(readRowValue(row, 'total_paid'))])
+    )
 
-      current.total_billed += toNumber(invoice.total_amount)
-      totalsByClient.set(invoice.client_id, current)
-      invoiceClientMap.set(invoice.id, invoice.client_id)
-    })
-
-    const invoiceIds = Array.from(invoiceClientMap.keys())
-
-    if (invoiceIds.length) {
-      const payments = await Payment.findAll({
-        where: {
-          invoice_id: {
-            [Op.in]: invoiceIds,
-          },
-        },
-        attributes: ['invoice_id', 'amount_paid'],
-      })
-
-      payments.forEach(payment => {
-        const clientId = invoiceClientMap.get(payment.invoice_id)
-        if (!clientId) {
-          return
-        }
-
-        const current = totalsByClient.get(clientId)
-        if (!current) {
-          return
-        }
-
-        current.total_paid += toNumber(payment.amount_paid)
-      })
-    }
-
-    const clientIds = Array.from(totalsByClient.keys())
     const clients = await Client.findAll({
       where: {
         id: {
@@ -500,25 +545,21 @@ async function getTopClients(req, res, next) {
         },
       },
       attributes: ['id', 'name'],
+      raw: true,
     })
 
     const clientNameMap = new Map(clients.map(client => [client.id, client.name]))
 
-    const data = Array.from(totalsByClient.values())
-      .map(item => ({
-        client_id: item.client_id,
-        client_name: clientNameMap.get(item.client_id) || 'Unknown client',
-        total_billed: roundCurrency(item.total_billed),
-        total_paid: roundCurrency(item.total_paid),
-      }))
-      .sort((left, right) => {
-        if (right.total_billed !== left.total_billed) {
-          return right.total_billed - left.total_billed
-        }
+    const data = billedRows.map(row => {
+      const clientId = readRowValue(row, 'client_id')
 
-        return left.client_name.localeCompare(right.client_name)
-      })
-      .slice(0, 5)
+      return {
+        client_id: clientId,
+        client_name: clientNameMap.get(clientId) || 'Unknown client',
+        total_billed: roundCurrency(readRowValue(row, 'total_billed')),
+        total_paid: roundCurrency(paidByClient.get(clientId) || 0),
+      }
+    })
 
     return sendSuccess(res, {
       data,
@@ -689,7 +730,7 @@ async function getFbrStatus(req, res, next) {
             where: invoiceWhere,
           },
         ],
-      }),
+      })
     ])
 
     return sendSuccess(res, {

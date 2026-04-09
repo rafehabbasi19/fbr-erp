@@ -1,5 +1,10 @@
 'use strict'
 
+const {
+  clearDashboardSummaryCache,
+  invalidateDashboardSummaryCacheForCompany,
+} = require('../services/dashboardCacheService')
+
 module.exports = (sequelize, DataTypes) => {
   const Invoice = sequelize.define(
     'Invoice',
@@ -46,6 +51,45 @@ module.exports = (sequelize, DataTypes) => {
     Invoice.hasMany(db.FbrSubmission, { foreignKey: 'invoice_id', as: 'fbrSubmissions' })
     Invoice.hasMany(db.FbrApiLog, { foreignKey: 'invoice_id', as: 'fbrLogs' })
   }
+
+  function invalidateSummaryCacheByInvoice(invoice) {
+    if (!invoice || !invoice.company_id) {
+      clearDashboardSummaryCache()
+      return
+    }
+
+    invalidateDashboardSummaryCacheForCompany(invoice.company_id)
+  }
+
+  Invoice.addHook(
+    'afterCreate',
+    'invalidateDashboardSummaryCacheAfterCreateInvoice',
+    invalidateSummaryCacheByInvoice
+  )
+
+  Invoice.addHook(
+    'afterUpdate',
+    'invalidateDashboardSummaryCacheAfterUpdateInvoice',
+    invalidateSummaryCacheByInvoice
+  )
+
+  Invoice.addHook(
+    'afterDestroy',
+    'invalidateDashboardSummaryCacheAfterDestroyInvoice',
+    invalidateSummaryCacheByInvoice
+  )
+
+  Invoice.addHook('afterBulkCreate', 'invalidateDashboardSummaryCacheAfterBulkCreateInvoice', () => {
+    clearDashboardSummaryCache()
+  })
+
+  Invoice.addHook('afterBulkUpdate', 'invalidateDashboardSummaryCacheAfterBulkUpdateInvoice', () => {
+    clearDashboardSummaryCache()
+  })
+
+  Invoice.addHook('afterBulkDestroy', 'invalidateDashboardSummaryCacheAfterBulkDestroyInvoice', () => {
+    clearDashboardSummaryCache()
+  })
 
   return Invoice
 }

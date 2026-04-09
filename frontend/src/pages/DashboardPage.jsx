@@ -584,7 +584,7 @@ function DashboardPage() {
               label={card.label}
               value={card.value}
               trend={card.trend}
-              loading={summaryState.isLoading || chartState.isLoading}
+              loading={summaryState.isLoading}
             />
           ))}
         </section>

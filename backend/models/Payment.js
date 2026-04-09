@@ -1,5 +1,10 @@
 'use strict'
 
+const {
+  clearDashboardSummaryCache,
+  invalidateDashboardSummaryCacheForCompany,
+} = require('../services/dashboardCacheService')
+
 module.exports = (sequelize, DataTypes) => {
   const Payment = sequelize.define(
     'Payment',
@@ -28,6 +33,54 @@ module.exports = (sequelize, DataTypes) => {
     Payment.belongsTo(db.Invoice, { foreignKey: 'invoice_id', as: 'invoice' })
     Payment.belongsTo(db.User, { foreignKey: 'recorded_by', as: 'recorder' })
   }
+
+  async function invalidateSummaryCacheByPayment(payment) {
+    if (!payment || !payment.invoice_id) {
+      clearDashboardSummaryCache()
+      return
+    }
+
+    const invoice = await sequelize.models.Invoice.findByPk(payment.invoice_id, {
+      attributes: ['company_id'],
+    })
+
+    if (!invoice || !invoice.company_id) {
+      clearDashboardSummaryCache()
+      return
+    }
+
+    invalidateDashboardSummaryCacheForCompany(invoice.company_id)
+  }
+
+  Payment.addHook(
+    'afterCreate',
+    'invalidateDashboardSummaryCacheAfterCreatePayment',
+    invalidateSummaryCacheByPayment
+  )
+
+  Payment.addHook(
+    'afterUpdate',
+    'invalidateDashboardSummaryCacheAfterUpdatePayment',
+    invalidateSummaryCacheByPayment
+  )
+
+  Payment.addHook(
+    'afterDestroy',
+    'invalidateDashboardSummaryCacheAfterDestroyPayment',
+    invalidateSummaryCacheByPayment
+  )
+
+  Payment.addHook('afterBulkCreate', 'invalidateDashboardSummaryCacheAfterBulkCreatePayment', () => {
+    clearDashboardSummaryCache()
+  })
+
+  Payment.addHook('afterBulkUpdate', 'invalidateDashboardSummaryCacheAfterBulkUpdatePayment', () => {
+    clearDashboardSummaryCache()
+  })
+
+  Payment.addHook('afterBulkDestroy', 'invalidateDashboardSummaryCacheAfterBulkDestroyPayment', () => {
+    clearDashboardSummaryCache()
+  })
 
   return Payment
 }

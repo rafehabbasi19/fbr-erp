@@ -40,6 +40,7 @@ const {
   Client,
   AuditLog,
 } = require('../models')
+const { clearDashboardSummaryCache } = require('../services/dashboardCacheService')
 
 function buildAccessToken(payloadOverrides = {}) {
   return jwt.sign(
@@ -58,6 +59,7 @@ describe('Dashboard phase 3 APIs', () => {
   beforeEach(() => {
     jest.clearAllMocks()
     process.env.JWT_SECRET = 'dashboard_phase3_test_secret'
+    clearDashboardSummaryCache()
 
     AccessTokenBlacklist.findOne.mockResolvedValue(null)
     User.findByPk.mockResolvedValue({
@@ -78,9 +80,8 @@ describe('Dashboard phase 3 APIs', () => {
 
   it('GET /api/v1/dashboard/revenue-chart returns monthly buckets with scoped data', async () => {
     Invoice.findAll.mockResolvedValue([
-      { invoice_date: '2026-01-02', total_amount: '1000.00' },
-      { invoice_date: '2026-01-18', total_amount: '2000.00' },
-      { invoice_date: '2026-02-05', total_amount: '3500.50' },
+      { bucket_key: '2026-01', revenue: '3000.00', invoice_count: '2' },
+      { bucket_key: '2026-02', revenue: '3500.50', invoice_count: '1' },
     ])
 
     const token = buildAccessToken()
@@ -120,15 +121,13 @@ describe('Dashboard phase 3 APIs', () => {
 
   it('GET /api/v1/dashboard/top-clients returns top 5 clients by billed amount', async () => {
     Invoice.findAll.mockResolvedValue([
-      { id: 'inv-1', client_id: 'client-1', total_amount: '5000.00' },
-      { id: 'inv-2', client_id: 'client-1', total_amount: '2000.00' },
-      { id: 'inv-3', client_id: 'client-2', total_amount: '3000.00' },
-      { id: 'inv-4', client_id: 'client-3', total_amount: '1000.00' },
+      { client_id: 'client-1', total_billed: '7000.00' },
+      { client_id: 'client-2', total_billed: '3000.00' },
+      { client_id: 'client-3', total_billed: '1000.00' },
     ])
     Payment.findAll.mockResolvedValue([
-      { invoice_id: 'inv-1', amount_paid: '1500.00' },
-      { invoice_id: 'inv-2', amount_paid: '500.00' },
-      { invoice_id: 'inv-3', amount_paid: '3000.00' },
+      { client_id: 'client-1', total_paid: '2000.00' },
+      { client_id: 'client-2', total_paid: '3000.00' },
     ])
     Client.findAll.mockResolvedValue([
       { id: 'client-1', name: 'Alpha Traders' },
