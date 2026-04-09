@@ -25,7 +25,7 @@ router.use(requireAuth)
 
 // router.use('/companies',      require('./company.routes'))
 router.use('/clients', require('./client.routes'))
-// router.use('/invoices',       require('./invoice.routes'))
+router.use('/invoices', require('./invoice.routes'))
 // router.use('/fbr',            require('./fbr.routes'))
 // router.use('/csv',            require('./csv.routes'))
 router.use('/dashboard', require('./dashboard.routes'))

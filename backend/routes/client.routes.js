@@ -1,12 +1,19 @@
 'use strict'
 
 const { Router } = require('express')
+const multer = require('multer')
 const { body, param, query } = require('express-validator')
 
 const clientController = require('../controllers/clientController')
 const { requireRole } = require('../middleware/rbac')
 
 const router = Router()
+const importUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 50 * 1024 * 1024,
+  },
+})
 
 const clientPayloadValidators = [
   body('name')
@@ -157,6 +164,8 @@ const idParamValidator = [
 
 router.use(requireRole(['super_admin', 'admin', 'company_admin', 'seller']))
 
+router.get('/import-template', clientController.getImportTemplate)
+router.post('/import', importUpload.single('file'), clientController.importClients)
 router.post('/', clientPayloadValidators, clientController.createClient)
 router.get('/', listQueryValidators, clientController.listClients)
 router.get('/:id', idParamValidator, clientController.getClientById)

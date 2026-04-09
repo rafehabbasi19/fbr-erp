@@ -12,15 +12,15 @@ const TAX_RATE_TEMPLATES = [
 
 const INVOICE_STATUSES = [
   'draft',
-  'submitted',
-  'verified',
-  'failed',
+  'sent',
+  'paid',
+  'overdue',
   'cancelled',
-  'submitted',
-  'verified',
+  'sent',
+  'partially_paid',
   'draft',
-  'submitted',
-  'verified',
+  'sent',
+  'paid',
 ]
 
 const PAYMENT_STATUSES = [
@@ -266,27 +266,50 @@ module.exports = {
           id: invoiceId,
           company_id: company.id,
           client_id: companyClients[i % companyClients.length].id,
+          seller_id: creatorId,
           created_by: creatorId,
           invoice_number: `${prefix}-${currentYear}-${String(i + 1).padStart(4, '0')}`,
+          issue_date: dateOnly(issueDate),
           invoice_date: dateOnly(issueDate),
           due_date: dateOnly(dueDate),
           status,
           payment_status: paymentStatus,
+          currency: 'PKR',
           subtotal,
+          discount_type: discount > 0 ? 'fixed' : null,
+          discount_value: discount,
+          discount_amount: discount,
           discount,
           tax_amount: taxAmount,
+          total: totalAmount,
           total_amount: totalAmount,
+          amount_paid:
+            paymentStatus === 'paid'
+              ? totalAmount
+              : paymentStatus === 'partial'
+                ? Number((totalAmount * 0.4).toFixed(2))
+                : 0,
           notes: `Seeded invoice ${i + 1} for company ${companyIndex + 1}`,
-          fbr_invoice_number: status === 'verified' ? `FBR-${companyIndex + 1}-${i + 1}` : null,
+          terms: 'Payment due within 15 days from invoice issue date.',
+          fbr_usin:
+            status === 'paid' || status === 'partially_paid'
+              ? `USIN-${companyIndex + 1}-${i + 1}`
+              : null,
+          fbr_invoice_number:
+            status === 'paid' || status === 'partially_paid'
+              ? `USIN-${companyIndex + 1}-${i + 1}`
+              : null,
           fbr_status:
-            status === 'verified'
-              ? 'verified'
-              : status === 'submitted'
-                ? 'pending'
-                : status === 'failed'
-                  ? 'rejected'
-                  : null,
+            status === 'paid' || status === 'partially_paid'
+              ? 'accepted'
+              : status === 'sent' || status === 'overdue'
+                ? 'submitted'
+                : 'not_submitted',
+          qr_code_data: null,
+          qr_code_path: null,
           qr_code_url: null,
+          pdf_path: null,
+          sent_at: status === 'sent' || status === 'paid' || status === 'partially_paid' ? now : null,
           created_at: now,
           updated_at: now,
         })
@@ -294,13 +317,19 @@ module.exports = {
         invoiceItems.push({
           id: uuidv4(),
           invoice_id: invoiceId,
+          sort_order: 0,
+          description: `Seed Product ${i + 1}`,
+          unit: 'piece',
           product_name: `Seed Product ${i + 1}`,
           hsn_code: null,
           quantity: 1,
           unit_price: subtotal,
+          tax_rate_id: null,
+          tax_rate_percentage: taxRate,
           discount,
           tax_rate: taxRate,
           tax_amount: taxAmount,
+          line_total: totalAmount,
           total_price: totalAmount,
           created_at: now,
           updated_at: now,

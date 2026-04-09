@@ -20,6 +20,9 @@ module.exports = (sequelize, DataTypes) => {
 
   TaxRate.associate = db => {
     TaxRate.belongsTo(db.Company, { foreignKey: 'company_id', as: 'company' })
+    if (db.InvoiceItem) {
+      TaxRate.hasMany(db.InvoiceItem, { foreignKey: 'tax_rate_id', as: 'invoiceItems' })
+    }
   }
 
   return TaxRate

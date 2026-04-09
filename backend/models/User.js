@@ -53,6 +53,7 @@ module.exports = (sequelize, DataTypes) => {
       })
     }
     User.hasMany(db.RefreshToken, { foreignKey: 'user_id', as: 'refreshTokens' })
+    User.hasMany(db.Invoice, { foreignKey: 'seller_id', as: 'soldInvoices' })
     User.hasMany(db.Invoice, { foreignKey: 'created_by', as: 'createdInvoices' })
     User.hasMany(db.AuditLog, { foreignKey: 'user_id', as: 'auditLogs' })
     User.hasMany(db.Notification, { foreignKey: 'user_id', as: 'notifications' })

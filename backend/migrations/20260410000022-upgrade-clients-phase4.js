@@ -86,8 +86,8 @@ module.exports = {
       await queryInterface.sequelize.query(`
         UPDATE clients
         SET status = CASE
-          WHEN is_active IS TRUE THEN 'active'
-          ELSE 'inactive'
+          WHEN is_active IS TRUE THEN 'active'::"enum_clients_status"
+          ELSE 'inactive'::"enum_clients_status"
         END
         WHERE status IS NULL;
       `)
@@ -99,7 +99,7 @@ module.exports = {
         country = COALESCE(NULLIF(TRIM(country), ''), 'Pakistan'),
         client_type = COALESCE(client_type, 'business'),
         payment_terms_days = COALESCE(payment_terms_days, 30),
-        status = COALESCE(status, 'active');
+        status = COALESCE(status, 'active'::"enum_clients_status");
     `)
 
     if (hasLegacyIsActive) {

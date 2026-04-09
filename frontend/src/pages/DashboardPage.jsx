@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Bar,
   BarChart,
@@ -207,6 +208,7 @@ function MetricCard({ icon, label, value, trend, loading }) {
 
 function DashboardPage() {
   const { user, role, accessToken, logout } = useAuth()
+  const navigate = useNavigate()
 
   const [summaryState, setSummaryState] = useState({ isLoading: true, error: '', data: null })
   const [chartState, setChartState] = useState({ isLoading: true, error: '', data: [] })
@@ -506,7 +508,7 @@ function DashboardPage() {
     }
 
     if (actionKey === 'add-client') {
-      setActionFeedback('Client module is planned in Phase 4. Quick action is staged.')
+      navigate('/clients/new')
       return
     }
 

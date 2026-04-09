@@ -562,7 +562,7 @@ Return 409 Conflict with message if blocked.
 Return downloadable CSV with headers: `name, email, phone, client_type, ntn, cnic, address, city`
 
 ### 4.3.2 — POST /api/v1/clients/import
-- Accept multipart CSV file (max 5MB, max 1000 rows)
+- Accept multipart CSV file (max 50MB, max 100000 rows)
 - Parse and validate each row
 - Return import report:
 ```json

@@ -1,11 +1,26 @@
 'use strict'
 
+const { Readable } = require('stream')
+const csvParser = require('csv-parser')
 const { Op, fn, col } = require('sequelize')
 const { validationResult } = require('express-validator')
 
 const { sendSuccess, sendError } = require('../utils/response')
 const AuditLogger = require('../utils/auditLogger')
 const { Client, Invoice, Payment } = require('../models')
+
+const CLIENT_IMPORT_MAX_ROWS = 100000
+const CLIENT_IMPORT_TEMPLATE_HEADERS = [
+  'name',
+  'email',
+  'phone',
+  'client_type',
+  'ntn',
+  'cnic',
+  'address',
+  'city',
+]
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 function validationErrors(req) {
   const errors = validationResult(req)
@@ -89,6 +104,134 @@ function normalizeClientPayload(body) {
   }
 }
 
+function validateClientImportRow(rawRow, rowNumber) {
+  const payload = normalizeClientPayload(rawRow)
+  const rowErrors = []
+
+  if (!payload.name) {
+    rowErrors.push({ row: rowNumber, field: 'name', message: 'Name is required' })
+  } else if (payload.name.length > 200) {
+    rowErrors.push({
+      row: rowNumber,
+      field: 'name',
+      message: 'Name must not exceed 200 characters',
+    })
+  }
+
+  if (!payload.client_type) {
+    rowErrors.push({ row: rowNumber, field: 'client_type', message: 'Client type is required' })
+  } else if (!['individual', 'business'].includes(payload.client_type)) {
+    rowErrors.push({
+      row: rowNumber,
+      field: 'client_type',
+      message: 'Client type must be either individual or business',
+    })
+  }
+
+  if (payload.email && !EMAIL_PATTERN.test(payload.email)) {
+    rowErrors.push({ row: rowNumber, field: 'email', message: 'Email must be valid' })
+  }
+
+  if (payload.ntn && !/^\d{7}$/.test(payload.ntn)) {
+    rowErrors.push({
+      row: rowNumber,
+      field: 'ntn',
+      message: 'NTN must contain exactly 7 digits',
+    })
+  }
+
+  if (payload.cnic && !/^\d{13}$/.test(payload.cnic)) {
+    rowErrors.push({
+      row: rowNumber,
+      field: 'cnic',
+      message: 'CNIC must contain exactly 13 digits without dashes',
+    })
+  }
+
+  if (!payload.ntn && !payload.cnic) {
+    rowErrors.push({
+      row: rowNumber,
+      field: 'ntn',
+      message: 'At least one of NTN or CNIC must be provided',
+    })
+  }
+
+  if (payload.client_type === 'individual' && !payload.cnic) {
+    rowErrors.push({
+      row: rowNumber,
+      field: 'cnic',
+      message: 'CNIC is required for individual clients',
+    })
+  }
+
+  return {
+    payload,
+    rowErrors,
+  }
+}
+
+function parseCsvRows(fileBuffer) {
+  return new Promise((resolve, reject) => {
+    const rows = []
+    const parsedHeaders = []
+    let rowCount = 0
+    let rowLimitExceeded = false
+
+    const parser = csvParser({
+      mapHeaders: ({ header }) => String(header || '').trim().toLowerCase(),
+      mapValues: ({ value }) => String(value || '').trim(),
+    })
+
+    parser.on('headers', headers => {
+      parsedHeaders.push(...headers)
+    })
+
+    parser.on('data', row => {
+      rowCount += 1
+
+      if (rowCount > CLIENT_IMPORT_MAX_ROWS) {
+        rowLimitExceeded = true
+        parser.destroy(new Error('CSV row limit exceeded'))
+        return
+      }
+
+      rows.push(row)
+    })
+
+    parser.on('error', error => {
+      if (rowLimitExceeded) {
+        const limitError = new Error(
+          `CSV exceeds maximum allowed rows (${CLIENT_IMPORT_MAX_ROWS.toLocaleString()})`
+        )
+        limitError.statusCode = 422
+        reject(limitError)
+        return
+      }
+
+      reject(error)
+    })
+
+    parser.on('end', () => {
+      const missingHeaders = CLIENT_IMPORT_TEMPLATE_HEADERS.filter(
+        header => !parsedHeaders.includes(header)
+      )
+
+      if (missingHeaders.length > 0) {
+        const headerError = new Error(
+          `CSV headers are invalid. Missing headers: ${missingHeaders.join(', ')}`
+        )
+        headerError.statusCode = 422
+        reject(headerError)
+        return
+      }
+
+      resolve(rows)
+    })
+
+    Readable.from(fileBuffer).pipe(parser)
+  })
+}
+
 function readRowValue(row, key) {
   if (row && typeof row.get === 'function') {
     return row.get(key)
@@ -165,6 +308,130 @@ function parsePagination(req) {
     page,
     perPage,
     offset: (page - 1) * perPage,
+  }
+}
+
+async function getImportTemplate(_req, res) {
+  const csvHeaderLine = `${CLIENT_IMPORT_TEMPLATE_HEADERS.join(',')}\n`
+
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+  res.setHeader('Content-Disposition', 'attachment; filename="clients-import-template.csv"')
+
+  return res.status(200).send(csvHeaderLine)
+}
+
+async function importClients(req, res, next) {
+  const user = req.user
+
+  if (!req.file || !req.file.buffer) {
+    return sendError(res, {
+      statusCode: 422,
+      message: 'CSV file is required',
+      errors: [{ field: 'file', message: 'Attach a CSV file using multipart/form-data' }],
+    })
+  }
+
+  try {
+    const rows = await parseCsvRows(req.file.buffer)
+    const importReport = {
+      total_rows: rows.length,
+      imported: 0,
+      failed: 0,
+      errors: [],
+    }
+
+    for (let index = 0; index < rows.length; index += 1) {
+      const rowNumber = index + 2
+      const { payload, rowErrors } = validateClientImportRow(rows[index], rowNumber)
+
+      if (rowErrors.length > 0) {
+        importReport.failed += 1
+        importReport.errors.push(...rowErrors)
+        continue
+      }
+
+      const duplicateError = await findDuplicateTaxIdentifier({
+        companyId: user.company_id,
+        ntn: payload.ntn,
+        cnic: payload.cnic,
+      })
+
+      if (duplicateError) {
+        importReport.failed += 1
+        importReport.errors.push({
+          row: rowNumber,
+          field: duplicateError.field,
+          message: duplicateError.message,
+        })
+        continue
+      }
+
+      try {
+        await Client.create({
+          ...payload,
+          company_id: user.company_id,
+          created_by: user.id,
+          country: payload.country || 'Pakistan',
+          status: payload.status || 'active',
+        })
+
+        importReport.imported += 1
+      } catch (error) {
+        importReport.failed += 1
+
+        if (error.name === 'SequelizeUniqueConstraintError') {
+          const firstConstraint = Array.isArray(error.errors) ? error.errors[0] : null
+
+          importReport.errors.push({
+            row: rowNumber,
+            field: firstConstraint?.path || 'ntn',
+            message: firstConstraint?.message || 'Duplicate value found for this client',
+          })
+          continue
+        }
+
+        importReport.errors.push({
+          row: rowNumber,
+          field: 'row',
+          message: 'Unable to import this row due to an unexpected error',
+        })
+      }
+    }
+
+    await AuditLogger.log({
+      company_id: user.company_id,
+      user_id: user.id,
+      action: 'CLIENT_IMPORT_COMPLETED',
+      entity_type: 'Client',
+      entity_id: null,
+      new_values: {
+        total_rows: importReport.total_rows,
+        imported: importReport.imported,
+        failed: importReport.failed,
+      },
+      ip_address: req.ip || null,
+    })
+
+    return sendSuccess(res, {
+      data: importReport,
+      message: 'Client CSV import completed',
+    })
+  } catch (err) {
+    if (err.statusCode) {
+      return sendError(res, {
+        statusCode: err.statusCode,
+        message: err.message,
+      })
+    }
+
+    if (String(err.message || '').toLowerCase().includes('csv')) {
+      return sendError(res, {
+        statusCode: 422,
+        message: 'CSV parsing failed. Ensure the file is valid and matches the template headers.',
+      })
+    }
+
+    return next(err)
   }
 }
 
@@ -614,6 +881,8 @@ async function deleteClient(req, res, next) {
 }
 
 module.exports = {
+  getImportTemplate,
+  importClients,
   createClient,
   listClients,
   getClientById,

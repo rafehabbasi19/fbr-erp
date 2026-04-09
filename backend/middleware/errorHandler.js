@@ -21,6 +21,21 @@ const errorHandler = (err, req, res, _next) => {
     })
   }
 
+  // Multer upload errors
+  if (err.name === 'MulterError') {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return sendError(res, {
+        statusCode: 413,
+        message: 'Uploaded file exceeds the 50MB limit',
+      })
+    }
+
+    return sendError(res, {
+      statusCode: 422,
+      message: err.message || 'File upload failed',
+    })
+  }
+
   // JWT errors
   if (err.name === 'JsonWebTokenError') {
     return sendError(res, {

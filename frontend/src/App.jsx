@@ -3,6 +3,9 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import PublicOnlyRoute from './components/PublicOnlyRoute'
+import ClientDetailPage from './pages/ClientDetailPage'
+import ClientFormPage from './pages/ClientFormPage'
+import ClientListPage from './pages/ClientListPage'
 import DashboardPage from './pages/DashboardPage'
 import ForgotPasswordPage from './pages/ForgotPasswordPage'
 import LoginPage from './pages/LoginPage'
@@ -23,6 +26,10 @@ function App() {
 
           <Route element={<ProtectedRoute />}>
             <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/clients" element={<ClientListPage />} />
+            <Route path="/clients/new" element={<ClientFormPage />} />
+            <Route path="/clients/:id" element={<ClientDetailPage />} />
+            <Route path="/clients/:id/edit" element={<ClientFormPage />} />
           </Route>
 
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
