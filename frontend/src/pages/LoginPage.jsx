@@ -1,7 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 
 import { useAuth } from '../context/AuthContext'
+import ErrorAlert from '../components/ErrorAlert'
+import { getApiErrorMessage } from '../utils/errorMessage'
+import { scrollToFirstFieldError, scrollToRef } from '../utils/scrollToError'
 
 function validateLogin(values) {
   const errors = {}
@@ -25,6 +28,11 @@ function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
 
+  const emailRef = useRef(null)
+  const passwordRef = useRef(null)
+  const lockoutRef = useRef(null)
+  const serverErrorRef = useRef(null)
+
   const [form, setForm] = useState({ email: '', password: '' })
   const [showPassword, setShowPassword] = useState(false)
   const [errors, setErrors] = useState({})
@@ -32,10 +40,34 @@ function LoginPage() {
   const [serverMessage, setServerMessage] = useState('')
   const [lockoutMessage, setLockoutMessage] = useState('')
 
-  const resetSuccessMessage = useMemo(
-    () => location.state?.resetMessage || '',
+  const noticeMessage = useMemo(
+    () => location.state?.resetMessage || location.state?.registerMessage || '',
     [location.state]
   )
+
+  const registerVerificationUrl = useMemo(
+    () => location.state?.registerVerificationUrl || '',
+    [location.state]
+  )
+
+  const fieldRefs = useMemo(
+    () => ({
+      email: emailRef,
+      password: passwordRef,
+    }),
+    []
+  )
+
+  useEffect(() => {
+    if (lockoutMessage) {
+      scrollToRef(lockoutRef)
+      return
+    }
+
+    if (serverMessage) {
+      scrollToRef(serverErrorRef)
+    }
+  }, [lockoutMessage, serverMessage])
 
   function handleChange(event) {
     const { name, value } = event.target
@@ -60,6 +92,7 @@ function LoginPage() {
     setErrors(nextErrors)
 
     if (Object.keys(nextErrors).length > 0) {
+      scrollToFirstFieldError(nextErrors, fieldRefs)
       return
     }
 
@@ -76,8 +109,10 @@ function LoginPage() {
       navigate('/dashboard', { replace: true })
     } catch (error) {
       const statusCode = error?.response?.status
-      const apiMessage =
-        error?.response?.data?.message || 'Unable to sign in right now. Please try again.'
+      const apiMessage = getApiErrorMessage(
+        error,
+        'Unable to sign in right now. Please try again.'
+      )
 
       if (statusCode === 423) {
         setLockoutMessage(apiMessage)
@@ -101,22 +136,31 @@ function LoginPage() {
             </p>
           </header>
 
-          {resetSuccessMessage ? (
-            <p className="mb-4 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-200">
-              {resetSuccessMessage}
-            </p>
+          {noticeMessage ? (
+            <div className="mb-4 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-200">
+              <p>{noticeMessage}</p>
+              {registerVerificationUrl ? (
+                <p className="mt-2 text-xs text-zinc-300">
+                  Verification link:{' '}
+                  <a
+                    href={registerVerificationUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline underline-offset-4 break-all"
+                  >
+                    Open verification link
+                  </a>
+                </p>
+              ) : null}
+            </div>
           ) : null}
 
           {lockoutMessage ? (
-            <p className="mb-4 rounded-lg border border-zinc-600 bg-zinc-950 px-3 py-2 text-sm text-zinc-100">
-              {lockoutMessage}
-            </p>
+            <ErrorAlert ref={lockoutRef} title="Account Locked" message={lockoutMessage} />
           ) : null}
 
           {serverMessage ? (
-            <p className="mb-4 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-300">
-              {serverMessage}
-            </p>
+            <ErrorAlert ref={serverErrorRef} title="Sign-In Failed" message={serverMessage} />
           ) : null}
 
           <form className="space-y-5" onSubmit={handleSubmit} noValidate>
@@ -126,6 +170,8 @@ function LoginPage() {
                 className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-zinc-100 outline-none transition focus:border-zinc-400"
                 type="email"
                 name="email"
+                ref={emailRef}
+                aria-invalid={Boolean(errors.email)}
                 value={form.email}
                 onChange={handleChange}
                 autoComplete="email"
@@ -141,6 +187,8 @@ function LoginPage() {
                   className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2.5 pr-20 text-sm text-zinc-100 outline-none transition focus:border-zinc-400"
                   type={showPassword ? 'text' : 'password'}
                   name="password"
+                  ref={passwordRef}
+                  aria-invalid={Boolean(errors.password)}
                   value={form.password}
                   onChange={handleChange}
                   autoComplete="current-password"
@@ -162,6 +210,9 @@ function LoginPage() {
             <div className="flex items-center justify-between">
               <Link to="/forgot-password" className="text-sm text-zinc-300 underline underline-offset-4">
                 Forgot password?
+              </Link>
+              <Link to="/register" className="text-sm text-zinc-300 underline underline-offset-4">
+                Create account
               </Link>
             </div>
 

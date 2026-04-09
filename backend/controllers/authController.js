@@ -28,6 +28,12 @@ const RESEND_LIMIT_PER_HOUR = 3
 const BCRYPT_COST = 12
 const MAX_FAILED_ATTEMPTS = 5
 const ACCOUNT_LOCKOUT_WINDOW_MS = 15 * 60 * 1000
+const APP_ENV = (process.env.APP_ENV || process.env.NODE_ENV || 'development').toLowerCase()
+const IS_PRODUCTION = APP_ENV === 'production'
+const ALLOW_UNVERIFIED_LOGIN =
+  String(process.env.ALLOW_UNVERIFIED_LOGIN || (APP_ENV === 'development' ? 'true' : 'false'))
+    .toLowerCase()
+    .trim() === 'true'
 
 function parseDurationToSeconds(durationValue, fallbackSeconds) {
   const value = String(durationValue || '').trim()
@@ -253,14 +259,32 @@ async function register(req, res, next) {
       throw error
     }
 
-    let message = 'Registration successful. Please verify your email before login.'
+    let message = ALLOW_UNVERIFIED_LOGIN
+      ? 'Registration successful. Email verification is currently optional for login in this environment.'
+      : 'Registration successful. Please verify your email before login.'
+    let meta = null
 
     try {
-      await sendVerificationEmail({
+      const mailResult = await sendVerificationEmail({
         to: normalizedEmail,
         name: user.name,
         token: rawToken,
       })
+
+      if (mailResult?.skipped) {
+        message =
+          'Registration successful, but SMTP is not configured. Use resend verification or ask support for the verification link.'
+
+        if (!IS_PRODUCTION && mailResult.previewUrl) {
+          const verificationApiUrl = `${req.protocol}://${req.get('host')}/api/v1/auth/verify-email/${rawToken}`
+
+          meta = {
+            verification_url: mailResult.previewUrl,
+            verification_api_url: verificationApiUrl,
+            email_delivery: 'skipped',
+          }
+        }
+      }
     } catch (mailError) {
       console.warn('[Auth] Verification email failed during registration:', mailError.message)
       message =
@@ -284,6 +308,7 @@ async function register(req, res, next) {
       statusCode: 201,
       data: sanitizeUser(user),
       message,
+      meta,
     })
   } catch (err) {
     return next(err)
@@ -456,13 +481,29 @@ async function resendVerification(req, res, next) {
     }
 
     let message = 'Verification email sent successfully'
+    let meta = null
 
     try {
-      await sendVerificationEmail({
+      const mailResult = await sendVerificationEmail({
         to: user.email,
         name: user.name,
         token: rawToken,
       })
+
+      if (mailResult?.skipped) {
+        message =
+          'Verification token refreshed, but SMTP is not configured. Use the provided verification link.'
+
+        if (!IS_PRODUCTION && mailResult.previewUrl) {
+          const verificationApiUrl = `${req.protocol}://${req.get('host')}/api/v1/auth/verify-email/${rawToken}`
+
+          meta = {
+            verification_url: mailResult.previewUrl,
+            verification_api_url: verificationApiUrl,
+            email_delivery: 'skipped',
+          }
+        }
+      }
     } catch (mailError) {
       console.warn('[Auth] Verification email resend failed:', mailError.message)
       message =
@@ -481,6 +522,7 @@ async function resendVerification(req, res, next) {
     return sendSuccess(res, {
       message,
       data: null,
+      meta,
     })
   } catch (err) {
     return next(err)
@@ -520,7 +562,7 @@ async function login(req, res, next) {
       })
     }
 
-    if (!user.email_verified_at) {
+    if (!ALLOW_UNVERIFIED_LOGIN && !user.email_verified_at) {
       return sendError(res, {
         statusCode: 403,
         message: 'Email must be verified before login',
@@ -651,7 +693,7 @@ async function refresh(req, res, next) {
       })
     }
 
-    if (!user.email_verified_at) {
+    if (!ALLOW_UNVERIFIED_LOGIN && !user.email_verified_at) {
       return sendError(res, {
         statusCode: 403,
         message: 'Email must be verified before requesting new tokens',

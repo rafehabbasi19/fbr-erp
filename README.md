@@ -133,6 +133,7 @@ cd frontend && npm run dev
 | `JWT_EXPIRES_IN` | Access token expiry | `15m` |
 | `REFRESH_TOKEN_SECRET` | Refresh token secret | — |
 | `REFRESH_TOKEN_EXPIRES_IN` | Refresh token expiry | `7d` |
+| `ALLOW_UNVERIFIED_LOGIN` | Allow login/refresh before email verification (useful for local dev only) | `true` |
 | `ENCRYPTION_KEY` | AES-256 key (32-byte hex) | — |
 | `FBR_API_URL` | FBR base URL (Phase 1 key) | `https://gw.fbr.gov.pk/imssandbox/api/Live/` |
 | `FBR_ENV` | FBR environment | `sandbox` |
@@ -146,6 +147,7 @@ cd frontend && npm run dev
 | `SMTP_USER` | SMTP username (email) | — |
 | `SMTP_PASS` | SMTP app password | — |
 | `CLIENT_URL` | Frontend URL (for CORS) | `http://localhost:5173` |
+| `CLIENT_URLS` | Additional allowed frontend origins (comma-separated, production) | `https://app.example.com,https://admin.example.com` |
 
 ### Frontend (`frontend/.env`)
 

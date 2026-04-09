@@ -12,6 +12,16 @@ const errorHandler = require('./middleware/errorHandler')
 const { buildEnvelope, sendSuccess } = require('./utils/response')
 
 const app = express()
+const APP_ENV = process.env.APP_ENV || process.env.NODE_ENV || 'development'
+const isProduction = APP_ENV === 'production'
+
+const configuredCorsOrigins = [
+  process.env.CLIENT_URL,
+  ...(process.env.CLIENT_URLS || '')
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean),
+].filter(Boolean)
 
 // ─── Security Headers ──────────────────────────────────────────────────────
 app.use(helmet())
@@ -19,7 +29,23 @@ app.use(helmet())
 // ─── CORS ─────────────────────────────────────────────────────────────────
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || 'http://localhost:5173',
+    origin(origin, callback) {
+      // Allow non-browser clients (curl, Postman, server-to-server).
+      if (!origin) {
+        return callback(null, true)
+      }
+
+      // In development, allow all origins so Vite port changes do not break auth calls.
+      if (!isProduction) {
+        return callback(null, true)
+      }
+
+      if (configuredCorsOrigins.includes(origin)) {
+        return callback(null, true)
+      }
+
+      return callback(new Error(`CORS blocked for origin: ${origin}`))
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],

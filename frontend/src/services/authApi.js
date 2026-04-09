@@ -17,6 +17,10 @@ export async function loginRequest(payload) {
   return api.post('/auth/login', payload)
 }
 
+export async function registerRequest(payload) {
+  return api.post('/auth/register', payload)
+}
+
 export async function refreshRequest(payload) {
   return api.post('/auth/refresh', payload)
 }

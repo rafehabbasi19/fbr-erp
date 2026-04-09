@@ -1,7 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
+import ErrorAlert from '../components/ErrorAlert'
 import { resetPasswordRequest } from '../services/authApi'
+import { getApiErrorMessage } from '../utils/errorMessage'
+import { scrollToFirstFieldError, scrollToRef } from '../utils/scrollToError'
 
 function validate(values) {
   const errors = {}
@@ -40,6 +43,12 @@ function ResetPasswordPage() {
   const [params] = useSearchParams()
   const navigate = useNavigate()
 
+  const tokenRef = useRef(null)
+  const emailRef = useRef(null)
+  const passwordRef = useRef(null)
+  const passwordConfirmationRef = useRef(null)
+  const serverErrorRef = useRef(null)
+
   const [form, setForm] = useState({
     token: params.get('token') || '',
     email: params.get('email') || '',
@@ -49,6 +58,22 @@ function ResetPasswordPage() {
   const [errors, setErrors] = useState({})
   const [serverMessage, setServerMessage] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const fieldRefs = useMemo(
+    () => ({
+      token: tokenRef,
+      email: emailRef,
+      password: passwordRef,
+      passwordConfirmation: passwordConfirmationRef,
+    }),
+    []
+  )
+
+  useEffect(() => {
+    if (serverMessage) {
+      scrollToRef(serverErrorRef)
+    }
+  }, [serverMessage])
 
   function updateForm(name, value) {
     setForm(current => ({
@@ -71,6 +96,7 @@ function ResetPasswordPage() {
     setErrors(nextErrors)
 
     if (Object.keys(nextErrors).length > 0) {
+      scrollToFirstFieldError(nextErrors, fieldRefs)
       return
     }
 
@@ -91,9 +117,10 @@ function ResetPasswordPage() {
         },
       })
     } catch (error) {
-      const apiMessage =
-        error?.response?.data?.message ||
+      const apiMessage = getApiErrorMessage(
+        error,
         'Unable to reset password right now. Please request a new reset link.'
+      )
       setServerMessage(apiMessage)
     } finally {
       setIsSubmitting(false)
@@ -113,9 +140,7 @@ function ResetPasswordPage() {
           </header>
 
           {serverMessage ? (
-            <p className="mb-4 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-200">
-              {serverMessage}
-            </p>
+            <ErrorAlert ref={serverErrorRef} title="Password Reset Failed" message={serverMessage} />
           ) : null}
 
           <form className="space-y-4" onSubmit={handleSubmit} noValidate>
@@ -124,6 +149,8 @@ function ResetPasswordPage() {
               <input
                 className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-zinc-100 outline-none transition focus:border-zinc-400"
                 type="text"
+                ref={tokenRef}
+                aria-invalid={Boolean(errors.token)}
                 value={form.token}
                 onChange={event => updateForm('token', event.target.value)}
                 placeholder="Paste your reset token"
@@ -136,6 +163,8 @@ function ResetPasswordPage() {
               <input
                 className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-zinc-100 outline-none transition focus:border-zinc-400"
                 type="email"
+                ref={emailRef}
+                aria-invalid={Boolean(errors.email)}
                 value={form.email}
                 onChange={event => updateForm('email', event.target.value)}
                 autoComplete="email"
@@ -149,6 +178,8 @@ function ResetPasswordPage() {
               <input
                 className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-zinc-100 outline-none transition focus:border-zinc-400"
                 type="password"
+                ref={passwordRef}
+                aria-invalid={Boolean(errors.password)}
                 value={form.password}
                 onChange={event => updateForm('password', event.target.value)}
                 autoComplete="new-password"
@@ -164,6 +195,8 @@ function ResetPasswordPage() {
               <input
                 className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-zinc-100 outline-none transition focus:border-zinc-400"
                 type="password"
+                ref={passwordConfirmationRef}
+                aria-invalid={Boolean(errors.passwordConfirmation)}
                 value={form.passwordConfirmation}
                 onChange={event => updateForm('passwordConfirmation', event.target.value)}
                 autoComplete="new-password"

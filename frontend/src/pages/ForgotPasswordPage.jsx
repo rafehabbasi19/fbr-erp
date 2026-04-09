@@ -1,13 +1,26 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 
+import ErrorAlert from '../components/ErrorAlert'
 import { forgotPasswordRequest } from '../services/authApi'
+import { getApiErrorMessage } from '../utils/errorMessage'
+import { scrollToRef } from '../utils/scrollToError'
 
 function ForgotPasswordPage() {
+  const emailRef = useRef(null)
+  const serverErrorRef = useRef(null)
+
   const [email, setEmail] = useState('')
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [successMessage, setSuccessMessage] = useState('')
+  const [serverMessage, setServerMessage] = useState('')
+
+  useEffect(() => {
+    if (serverMessage) {
+      scrollToRef(serverErrorRef)
+    }
+  }, [serverMessage])
 
   function validate() {
     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -30,11 +43,13 @@ function ForgotPasswordPage() {
     setError(validationError)
 
     if (validationError) {
+      scrollToRef(emailRef)
       return
     }
 
     setIsSubmitting(true)
     setSuccessMessage('')
+    setServerMessage('')
 
     try {
       const response = await forgotPasswordRequest({ email: email.trim() })
@@ -43,7 +58,12 @@ function ForgotPasswordPage() {
           'If an account with that email exists, a password reset link has been sent.'
       )
     } catch (_error) {
-      setSuccessMessage('If an account with that email exists, a password reset link has been sent.')
+      setServerMessage(
+        getApiErrorMessage(
+          _error,
+          'Unable to process your request right now. Please try again in a moment.'
+        )
+      )
     } finally {
       setIsSubmitting(false)
     }
@@ -67,16 +87,23 @@ function ForgotPasswordPage() {
             </p>
           ) : null}
 
+          {serverMessage ? (
+            <ErrorAlert ref={serverErrorRef} title="Request Failed" message={serverMessage} />
+          ) : null}
+
           <form className="space-y-5" onSubmit={handleSubmit} noValidate>
             <label className="block">
               <span className="mb-2 block text-sm text-zinc-300">Email</span>
               <input
                 className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-zinc-100 outline-none transition focus:border-zinc-400"
                 type="email"
+                ref={emailRef}
+                aria-invalid={Boolean(error)}
                 value={email}
                 onChange={event => {
                   setEmail(event.target.value)
                   setError('')
+                  setServerMessage('')
                 }}
                 autoComplete="email"
                 placeholder="name@company.com"
