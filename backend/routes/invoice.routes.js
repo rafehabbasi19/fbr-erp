@@ -138,6 +138,7 @@ const readableRoles = ['super_admin', 'admin', 'company_admin', 'seller', 'accou
 
 router.get('/', requireRole(readableRoles), listValidators, invoiceController.listInvoices)
 router.get('/:id', requireRole(readableRoles), idParamValidator, invoiceController.getInvoiceById)
+router.get('/:id/pdf', requireRole(readableRoles), idParamValidator, invoiceController.getInvoicePdf)
 
 router.post(
   '/',

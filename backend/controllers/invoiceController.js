@@ -8,6 +8,12 @@ const AuditLogger = require('../utils/auditLogger')
 const { assignNextInvoiceNumber } = require('../services/invoiceNumberService')
 const { calculateInvoiceAmounts } = require('../services/invoiceCalculationService')
 const {
+  persistInvoiceQrPng,
+  persistInvoicePdf,
+  resolveStorageAbsolutePath,
+  fileExists,
+} = require('../services/invoiceAssetService')
+const {
   sequelize,
   Invoice,
   InvoiceItem,
@@ -405,6 +411,30 @@ async function fetchInvoiceDetailById({ user, invoiceId, transaction = null }) {
   return { invoice, fbrSubmission }
 }
 
+async function tryPersistQrAsset(invoice) {
+  if (!invoice || !invoice.id || !invoice.company_id || !invoice.qr_code_data) {
+    return null
+  }
+
+  try {
+    const qrAsset = await persistInvoiceQrPng({
+      companyId: invoice.company_id,
+      invoiceId: invoice.id,
+      qrCodeData: invoice.qr_code_data,
+    })
+
+    await invoice.update({
+      qr_code_path: qrAsset.publicPath,
+      qr_code_url: qrAsset.publicPath,
+    })
+
+    return qrAsset
+  } catch (error) {
+    console.warn(`[Invoice] QR asset generation failed for ${invoice.id}:`, error.message)
+    return null
+  }
+}
+
 function parsePagination(req) {
   const parsedPage = Number.parseInt(String(req.query.page || '1'), 10)
   const parsedPerPage = Number.parseInt(String(req.query.per_page || '10'), 10)
@@ -576,6 +606,10 @@ async function createInvoice(req, res, next) {
       user,
       invoiceId: createdInvoiceId,
     })
+
+    if (invoiceDetail?.invoice) {
+      await tryPersistQrAsset(invoiceDetail.invoice)
+    }
 
     await AuditLogger.log({
       company_id: user.company_id,
@@ -930,6 +964,10 @@ async function updateInvoice(req, res, next) {
       invoiceId: updatedInvoiceId,
     })
 
+    if (invoiceDetail?.invoice) {
+      await tryPersistQrAsset(invoiceDetail.invoice)
+    }
+
     await AuditLogger.log({
       company_id: user.company_id,
       user_id: user.id,
@@ -1182,6 +1220,10 @@ async function duplicateInvoice(req, res, next) {
       invoiceId: duplicatedInvoiceId,
     })
 
+    if (invoiceDetail?.invoice) {
+      await tryPersistQrAsset(invoiceDetail.invoice)
+    }
+
     await AuditLogger.log({
       company_id: user.company_id,
       user_id: user.id,
@@ -1383,6 +1425,70 @@ async function cancelInvoice(req, res, next) {
   }
 }
 
+async function getInvoicePdf(req, res, next) {
+  const errors = validationErrors(req)
+
+  if (errors) {
+    return sendError(res, {
+      statusCode: 422,
+      message: 'Validation failed',
+      errors,
+    })
+  }
+
+  const user = req.user
+
+  try {
+    const invoiceDetail = await fetchInvoiceDetailById({
+      user,
+      invoiceId: req.params.id,
+    })
+
+    if (!invoiceDetail) {
+      return sendError(res, {
+        statusCode: 404,
+        message: 'Invoice not found',
+      })
+    }
+
+    const invoice = invoiceDetail.invoice
+
+    const company = await Company.findByPk(invoice.company_id, {
+      attributes: ['id', 'name', 'ntn', 'strn', 'address', 'email', 'phone'],
+    })
+
+    let qrCodeAbsolutePath = resolveStorageAbsolutePath(invoice.qr_code_path)
+    if (!(await fileExists(qrCodeAbsolutePath))) {
+      const qrAsset = await tryPersistQrAsset(invoice)
+      qrCodeAbsolutePath = qrAsset?.absolutePath || resolveStorageAbsolutePath(invoice.qr_code_path)
+    }
+
+    const pdfAsset = await persistInvoicePdf({
+      invoice,
+      company,
+      client: invoice.client,
+      items: invoice.items,
+      payments: invoice.payments,
+      qrCodeAbsolutePath,
+    })
+
+    await invoice.update({
+      pdf_path: pdfAsset.publicPath,
+    })
+
+    const download = String(req.query.download || '').trim() === '1'
+    const disposition = download ? 'attachment' : 'inline'
+    const safeInvoiceNumber = String(invoice.invoice_number || 'invoice').replace(/[^a-zA-Z0-9_-]+/g, '_')
+
+    res.setHeader('Content-Type', 'application/pdf')
+    res.setHeader('Content-Disposition', `${disposition}; filename="${safeInvoiceNumber}.pdf"`)
+
+    return res.sendFile(pdfAsset.absolutePath)
+  } catch (err) {
+    return next(err)
+  }
+}
+
 module.exports = {
   createInvoice,
   listInvoices,
@@ -1392,4 +1498,5 @@ module.exports = {
   duplicateInvoice,
   sendInvoice,
   cancelInvoice,
+  getInvoicePdf,
 }

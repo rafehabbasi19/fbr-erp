@@ -51,6 +51,19 @@ jest.mock('../utils/auditLogger', () => ({
   log: jest.fn().mockResolvedValue(),
 }))
 
+jest.mock('../services/invoiceAssetService', () => ({
+  persistInvoiceQrPng: jest.fn().mockResolvedValue({
+    absolutePath: '/tmp/mock-qr.png',
+    publicPath: '/storage/qrcodes/mock-company/mock-invoice.png',
+  }),
+  persistInvoicePdf: jest.fn().mockResolvedValue({
+    absolutePath: '/tmp/mock-pdf.pdf',
+    publicPath: '/storage/pdfs/mock-company/mock-invoice.pdf',
+  }),
+  resolveStorageAbsolutePath: jest.fn().mockReturnValue('/tmp/mock-file'),
+  fileExists: jest.fn().mockResolvedValue(true),
+}))
+
 const app = require('../app')
 const {
   sequelize,
