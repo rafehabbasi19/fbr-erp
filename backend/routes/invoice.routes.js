@@ -65,6 +65,11 @@ const invoiceBodyValidators = [
     .optional({ nullable: true, checkFalsy: true })
     .isFloat({ min: 0, max: 100 })
     .withMessage('Item tax rate percentage must be between 0 and 100'),
+  body('items.*.price_includes_tax')
+    .optional({ nullable: true })
+    .isBoolean()
+    .withMessage('Item price includes tax flag must be a boolean')
+    .toBoolean(),
   body('items.*.sort_order')
     .optional({ nullable: true, checkFalsy: true })
     .isInt({ min: 0 })

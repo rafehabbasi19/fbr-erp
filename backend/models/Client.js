@@ -49,6 +49,9 @@ module.exports = (sequelize, DataTypes) => {
     Client.belongsTo(db.Company, { foreignKey: 'company_id', as: 'company' })
     Client.belongsTo(db.User, { foreignKey: 'created_by', as: 'creator' })
     Client.hasMany(db.Invoice, { foreignKey: 'client_id', as: 'invoices' })
+    if (db.TaxExemption) {
+      Client.hasMany(db.TaxExemption, { foreignKey: 'client_id', as: 'taxExemptions' })
+    }
     if (db.ClientContact) {
       Client.hasMany(db.ClientContact, { foreignKey: 'client_id', as: 'contacts' })
     }

@@ -147,3 +147,14 @@ export async function invoicePdfRequest(token, invoiceId, params = {}) {
     responseType: 'blob',
   })
 }
+
+export async function taxRatesListRequest(token, params = {}) {
+  return api.get('/tax-rates', {
+    ...authHeader(token),
+    params,
+  })
+}
+
+export async function taxRatesPreviewRequest(token, payload) {
+  return api.post('/tax-rates/preview', payload, authHeader(token))
+}

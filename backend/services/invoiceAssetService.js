@@ -37,6 +37,37 @@ function formatCurrency(value, currency = 'PKR') {
   return `${currency} ${roundCurrency(value).toFixed(2)}`
 }
 
+function buildTaxBreakdown(items) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return []
+  }
+
+  const buckets = new Map()
+
+  items.forEach(item => {
+    const rate = roundCurrency(item?.tax_rate_percentage ?? item?.tax_rate)
+    const taxAmount = roundCurrency(item?.tax_amount)
+    const lineTotal = roundCurrency(item?.line_total ?? item?.total_price)
+    const taxableAmount = roundCurrency(lineTotal - taxAmount)
+    const key = rate.toFixed(2)
+
+    if (!buckets.has(key)) {
+      buckets.set(key, {
+        label: `Tax ${rate.toFixed(2)}%`,
+        rate,
+        taxableAmount: 0,
+        taxAmount: 0,
+      })
+    }
+
+    const bucket = buckets.get(key)
+    bucket.taxableAmount = roundCurrency(bucket.taxableAmount + taxableAmount)
+    bucket.taxAmount = roundCurrency(bucket.taxAmount + taxAmount)
+  })
+
+  return Array.from(buckets.values()).sort((left, right) => right.rate - left.rate)
+}
+
 async function ensureDirectoryExists(dirPath) {
   await fs.promises.mkdir(dirPath, { recursive: true })
 }
@@ -166,6 +197,7 @@ async function persistInvoicePdf({
     const invoiceCurrency = invoice?.currency || 'PKR'
     const normalizedItems = Array.isArray(items) ? items : []
     const normalizedPayments = Array.isArray(payments) ? payments : []
+    const taxBreakdown = buildTaxBreakdown(normalizedItems)
 
     doc.fontSize(20).text('TAX INVOICE', { align: 'right' })
     doc.moveDown(0.5)
@@ -263,7 +295,20 @@ async function persistInvoicePdf({
       }
     )
     y += 16
-    doc.text(`Tax: ${formatCurrency(invoice?.tax_amount, invoiceCurrency)}`, totalsX, y, {
+    taxBreakdown.forEach(row => {
+      doc.text(
+        `${row.label} on ${formatCurrency(row.taxableAmount, invoiceCurrency)}: ${formatCurrency(row.taxAmount, invoiceCurrency)}`,
+        totalsX,
+        y,
+        {
+          width: pageWidth * 0.45,
+          align: 'right',
+        }
+      )
+      y += 16
+    })
+
+    doc.text(`Total Tax: ${formatCurrency(invoice?.tax_amount, invoiceCurrency)}`, totalsX, y, {
       width: pageWidth * 0.45,
       align: 'right',
     })

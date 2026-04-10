@@ -225,6 +225,36 @@ function serializeInvoiceItem(item) {
   }
 }
 
+function buildTaxBreakdownFromItems(items) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return []
+  }
+
+  const buckets = new Map()
+
+  items.forEach(rawItem => {
+    const item = serializeInvoiceItem(rawItem)
+    const rate = roundCurrency(item.tax_rate_percentage)
+    const taxableAmount = roundCurrency(item.line_total - item.tax_amount)
+    const key = rate.toFixed(2)
+
+    if (!buckets.has(key)) {
+      buckets.set(key, {
+        name: `Tax ${rate.toFixed(2)}%`,
+        rate,
+        taxable_amount: 0,
+        tax_amount: 0,
+      })
+    }
+
+    const bucket = buckets.get(key)
+    bucket.taxable_amount = roundCurrency(bucket.taxable_amount + taxableAmount)
+    bucket.tax_amount = roundCurrency(bucket.tax_amount + item.tax_amount)
+  })
+
+  return Array.from(buckets.values()).sort((left, right) => right.rate - left.rate)
+}
+
 function serializePayment(payment) {
   const plain = typeof payment?.toJSON === 'function' ? payment.toJSON() : payment
 
@@ -358,6 +388,7 @@ function serializeInvoiceDetail(invoice, fbrSubmission = null) {
         }
       : null,
     items: Array.isArray(plain.items) ? plain.items.map(serializeInvoiceItem) : [],
+    tax_breakdown: buildTaxBreakdownFromItems(plain.items),
     payments: Array.isArray(plain.payments) ? plain.payments.map(serializePayment) : [],
     fbr_submission: serializeFbrSubmission(fbrSubmission),
   }
@@ -527,9 +558,11 @@ async function createInvoice(req, res, next) {
     const createdInvoiceId = await sequelize.transaction(async transaction => {
       const calculated = await calculateInvoiceAmounts({
         companyId: user.company_id,
+        clientId: payload.client_id,
         items: payload.items,
         discount_type: payload.discount_type,
         discount_value: payload.discount_value,
+        issue_date: payload.issue_date,
       })
 
       const invoiceNumber = await assignNextInvoiceNumber({
@@ -900,9 +933,11 @@ async function updateInvoice(req, res, next) {
     const updatedInvoiceId = await sequelize.transaction(async transaction => {
       const calculated = await calculateInvoiceAmounts({
         companyId: user.company_id,
+        clientId: payload.client_id,
         items: payload.items,
         discount_type: payload.discount_type,
         discount_value: payload.discount_value,
+        issue_date: payload.issue_date,
       })
 
       await currentInvoice.update(
@@ -1150,9 +1185,11 @@ async function duplicateInvoice(req, res, next) {
     const duplicatedInvoiceId = await sequelize.transaction(async transaction => {
       const calculated = await calculateInvoiceAmounts({
         companyId: user.company_id,
+        clientId: source.client_id,
         items: itemPayload,
         discount_type: source.discount_type,
         discount_value: source.discount_value,
+        issue_date: duplicateIssueDate,
       })
 
       const invoiceNumber = await assignNextInvoiceNumber({

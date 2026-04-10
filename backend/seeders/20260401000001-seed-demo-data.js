@@ -4,10 +4,10 @@ const { v4: uuidv4 } = require('uuid')
 const bcrypt = require('bcryptjs')
 
 const TAX_RATE_TEMPLATES = [
-  { label: 'Exempt (0%)', rate: 0.0, is_default: false },
-  { label: 'Reduced GST (5%)', rate: 5.0, is_default: false },
-  { label: 'Reduced GST (10%)', rate: 10.0, is_default: false },
-  { label: 'Standard GST (17%)', rate: 17.0, is_default: true },
+  { name: 'Exempt (0%)', rate_percentage: 0.0, tax_type: 'Exempt', is_default: false },
+  { name: 'Reduced GST (5%)', rate_percentage: 5.0, tax_type: 'GST', is_default: false },
+  { name: 'Reduced GST (10%)', rate_percentage: 10.0, tax_type: 'GST', is_default: false },
+  { name: 'Standard GST (17%)', rate_percentage: 17.0, tax_type: 'GST', is_default: true },
 ]
 
 const INVOICE_STATUSES = [
@@ -192,8 +192,10 @@ module.exports = {
       TAX_RATE_TEMPLATES.map(tr => ({
         id: uuidv4(),
         company_id: company.id,
-        label: tr.label,
-        rate: tr.rate,
+        name: tr.name,
+        rate_percentage: tr.rate_percentage,
+        tax_type: tr.tax_type,
+        description: null,
         is_default: tr.is_default,
         is_active: true,
         created_at: now,

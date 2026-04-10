@@ -9,11 +9,10 @@ import {
   createInvoiceRequest,
   invoiceDetailRequest,
   sendInvoiceRequest,
+  taxRatesListRequest,
   updateInvoiceRequest,
 } from '../services/authApi'
 import { getApiErrorMessage } from '../utils/errorMessage'
-
-const TAX_RATE_OPTIONS = [0, 5, 10, 17, 18]
 
 const CURRENCY_FORMATTER = new Intl.NumberFormat('en-PK', {
   style: 'currency',
@@ -61,6 +60,7 @@ function buildEmptyItem() {
     quantity: '1',
     unit: '',
     unit_price: '0',
+    tax_rate_id: '',
     tax_rate_percentage: '17',
   }
 }
@@ -115,6 +115,7 @@ function InvoiceFormPage() {
 
   const [errors, setErrors] = useState({})
   const [serverMessage, setServerMessage] = useState('')
+  const [taxRates, setTaxRates] = useState([])
   const [isLoadingInvoice, setIsLoadingInvoice] = useState(isEdit)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [dragIndex, setDragIndex] = useState(-1)
@@ -228,6 +229,23 @@ function InvoiceFormPage() {
 
         const loadedClients = response.data?.data || []
         setClients(loadedClients)
+
+        const taxRatesResponse = await taxRatesListRequest(accessToken)
+        const loadedTaxRates = taxRatesResponse.data?.data || []
+        setTaxRates(loadedTaxRates)
+
+        const defaultTaxRate = loadedTaxRates.find(rate => rate.is_default)
+
+        if (defaultTaxRate) {
+          setForm(current => ({
+            ...current,
+            items: current.items.map(item => ({
+              ...item,
+              tax_rate_id: item.tax_rate_id || defaultTaxRate.id,
+              tax_rate_percentage: String(defaultTaxRate.rate_percentage),
+            })),
+          }))
+        }
       } catch (error) {
         if (!isMounted) {
           return
@@ -274,6 +292,7 @@ function InvoiceFormPage() {
               quantity: String(item.quantity ?? '1'),
               unit: item.unit || '',
               unit_price: String(item.unit_price ?? '0'),
+              tax_rate_id: item.tax_rate_id || '',
               tax_rate_percentage: String(item.tax_rate_percentage ?? '0'),
             }))
           : [buildEmptyItem()]
@@ -383,17 +402,33 @@ function InvoiceFormPage() {
   }
 
   function updateItem(index, key, value) {
-    setForm(current => ({
-      ...current,
-      items: current.items.map((item, itemIndex) =>
-        itemIndex === index
-          ? {
-              ...item,
-              [key]: value,
-            }
-          : item
-      ),
-    }))
+    setForm(current => {
+      const items = current.items.map((item, itemIndex) => {
+        if (itemIndex !== index) {
+          return item
+        }
+
+        const updated = {
+          ...item,
+          [key]: value,
+        }
+
+        if (key === 'tax_rate_id') {
+          const selectedRate = taxRates.find(rate => rate.id === value)
+
+          if (selectedRate) {
+            updated.tax_rate_percentage = String(selectedRate.rate_percentage)
+          }
+        }
+
+        return updated
+      })
+
+      return {
+        ...current,
+        items,
+      }
+    })
 
     setErrors(current => ({
       ...current,
@@ -507,6 +542,7 @@ function InvoiceFormPage() {
         quantity: toNumber(item.quantity),
         unit: normalizeOptional(item.unit),
         unit_price: roundCurrency(item.unit_price),
+        tax_rate_id: normalizeOptional(item.tax_rate_id),
         tax_rate_percentage: roundCurrency(item.tax_rate_percentage),
         sort_order: index,
       })),
@@ -767,16 +803,27 @@ function InvoiceFormPage() {
                       </td>
                       <td className="px-2 py-2">
                         <select
-                          value={line.item.tax_rate_percentage}
-                          onChange={event => updateItem(line.index, 'tax_rate_percentage', event.target.value)}
+                          value={line.item.tax_rate_id || ''}
+                          onChange={event => updateItem(line.index, 'tax_rate_id', event.target.value)}
                           className="w-24 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100 outline-none transition focus:border-zinc-400"
                         >
-                          {TAX_RATE_OPTIONS.map(rate => (
-                            <option key={rate} value={String(rate)}>
-                              {rate}%
+                          <option value="">Custom %</option>
+                          {taxRates.map(rate => (
+                            <option key={rate.id} value={rate.id}>
+                              {rate.name} ({Number(rate.rate_percentage || 0).toFixed(2)}%)
                             </option>
                           ))}
                         </select>
+                        {!line.item.tax_rate_id ? (
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={line.item.tax_rate_percentage}
+                            onChange={event => updateItem(line.index, 'tax_rate_percentage', event.target.value)}
+                            className="mt-1 w-24 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 outline-none transition focus:border-zinc-400"
+                          />
+                        ) : null}
                       </td>
                       <td className="px-2 py-2 text-right text-zinc-300">{formatCurrency(line.lineTotal)}</td>
                       <td className="rounded-r-lg px-2 py-2">

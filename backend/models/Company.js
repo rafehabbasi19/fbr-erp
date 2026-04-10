@@ -25,6 +25,9 @@ module.exports = (sequelize, DataTypes) => {
     Company.hasMany(db.Client, { foreignKey: 'company_id', as: 'clients' })
     Company.hasMany(db.Invoice, { foreignKey: 'company_id', as: 'invoices' })
     Company.hasMany(db.TaxRate, { foreignKey: 'company_id', as: 'taxRates' })
+    if (db.TaxExemption) {
+      Company.hasMany(db.TaxExemption, { foreignKey: 'company_id', as: 'taxExemptions' })
+    }
     Company.hasOne(db.CompanySetting, { foreignKey: 'company_id', as: 'settings' })
     Company.hasOne(db.FbrToken, { foreignKey: 'company_id', as: 'fbrToken' })
     Company.hasMany(db.AuditLog, { foreignKey: 'company_id', as: 'auditLogs' })
