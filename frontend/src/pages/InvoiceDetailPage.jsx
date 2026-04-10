@@ -569,14 +569,20 @@ function InvoiceDetailPage() {
               <h2 className="text-sm uppercase tracking-[0.16em] text-zinc-500">Actions</h2>
               <div className="mt-4 grid gap-2">
                 {canSend ? (
-                  <button
-                    type="button"
-                    onClick={handleSend}
-                    disabled={isActionLoading}
-                    className="rounded-lg bg-emerald-500 px-4 py-2.5 text-sm font-medium text-emerald-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-70"
-                  >
-                    Send to Client
-                  </button>
+                  <div>
+                    <button
+                      type="button"
+                      onClick={handleSend}
+                      disabled={isActionLoading}
+                      title="Send marks this draft as officially issued to the client."
+                      className="w-full rounded-lg bg-emerald-500 px-4 py-2.5 text-sm font-medium text-emerald-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      Send to Client
+                    </button>
+                    <p className="mt-1 text-xs text-zinc-400">
+                      This does not email automatically. It marks the draft as issued and updates invoice status.
+                    </p>
+                  </div>
                 ) : null}
 
                 <button
