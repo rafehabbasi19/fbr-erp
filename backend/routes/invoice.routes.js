@@ -77,6 +77,16 @@ const listValidators = [
     .trim()
     .isIn(['draft', 'sent', 'partially_paid', 'paid', 'overdue', 'cancelled'])
     .withMessage('Status filter is invalid'),
+  query('fbr_status')
+    .optional({ checkFalsy: true })
+    .trim()
+    .isIn(['not_submitted', 'pending', 'submitted', 'accepted', 'rejected'])
+    .withMessage('FBR status filter is invalid'),
+  query('fbr_submitted')
+    .optional({ checkFalsy: true })
+    .trim()
+    .isIn(['1', 'true', 'yes', '0', 'false', 'no'])
+    .withMessage('FBR submitted filter must be a boolean-like value'),
   query('client_id').optional({ checkFalsy: true }).isUUID().withMessage('Client id must be a valid UUID'),
   query('seller_id').optional({ checkFalsy: true }).isUUID().withMessage('Seller id must be a valid UUID'),
   query('date_from')

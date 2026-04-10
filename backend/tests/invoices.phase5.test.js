@@ -1,5 +1,6 @@
 'use strict'
 
+const fs = require('fs')
 const jwt = require('jsonwebtoken')
 const request = require('supertest')
 
@@ -62,6 +63,8 @@ jest.mock('../services/invoiceAssetService', () => ({
   }),
   resolveStorageAbsolutePath: jest.fn().mockReturnValue('/tmp/mock-file'),
   fileExists: jest.fn().mockResolvedValue(true),
+  getFileModifiedAtMs: jest.fn().mockResolvedValue(new Date('2026-04-10T12:00:00.000Z').getTime()),
+  touchFile: jest.fn().mockResolvedValue(),
 }))
 
 const app = require('../app')
@@ -79,6 +82,13 @@ const {
   InvoiceNumberSequence,
 } = require('../models')
 const AuditLogger = require('../utils/auditLogger')
+const {
+  persistInvoicePdf,
+  resolveStorageAbsolutePath,
+  fileExists,
+  getFileModifiedAtMs,
+  touchFile,
+} = require('../services/invoiceAssetService')
 
 function buildAccessToken(payloadOverrides = {}) {
   return jwt.sign(
@@ -136,6 +146,8 @@ function buildInvoiceRow(overrides = {}) {
     fbr_usin: null,
     fbr_invoice_number: null,
     sent_at: null,
+    updated_at: '2026-04-10T10:00:00.000Z',
+    created_at: '2026-04-10T10:00:00.000Z',
     client: {
       id: '2b1cbf95-5f80-4df5-a9aa-5ba35989d111',
       name: 'Alpha Traders',
@@ -219,6 +231,10 @@ describe('Invoice Phase 5 APIs', () => {
     jest.clearAllMocks()
     process.env.JWT_SECRET = 'invoices_phase5_test_secret'
 
+    fs.writeFileSync('/tmp/mock-file', 'mock-pdf-file')
+    fs.writeFileSync('/tmp/mock-pdf.pdf', 'mock-generated-pdf')
+    fs.writeFileSync('/tmp/mock-qr.png', 'mock-qr')
+
     AccessTokenBlacklist.findOne.mockResolvedValue(null)
     User.findByPk.mockResolvedValue({
       id: '6a6fcb65-6ebf-4f0a-8614-1bf2e7fb8111',
@@ -238,6 +254,11 @@ describe('Invoice Phase 5 APIs', () => {
     InvoiceItem.destroy.mockResolvedValue(1)
     Payment.count.mockResolvedValue(0)
     FbrSubmission.findOne.mockResolvedValue(null)
+
+    resolveStorageAbsolutePath.mockImplementation(publicPath => (publicPath ? '/tmp/mock-file' : null))
+    fileExists.mockImplementation(async filePath => Boolean(filePath && fs.existsSync(filePath)))
+    getFileModifiedAtMs.mockResolvedValue(new Date('2026-04-10T12:00:00.000Z').getTime())
+    touchFile.mockResolvedValue()
 
     Company.findByPk.mockResolvedValue({
       id: '20f2cd5a-3418-4fd4-aec2-c7f9f0802111',
@@ -472,5 +493,62 @@ describe('Invoice Phase 5 APIs', () => {
     expect(res.statusCode).toBe(409)
     expect(res.body.success).toBe(false)
     expect(res.body.message).toContain('payments are already recorded')
+  })
+
+  it('GET /api/v1/invoices/:id/pdf reuses cached PDF when it is fresh', async () => {
+    const invoiceRow = buildInvoiceRow({
+      pdf_path: '/storage/pdfs/mock-company/mock-invoice.pdf',
+      updated_at: '2026-04-10T10:00:00.000Z',
+    })
+
+    Invoice.findOne.mockResolvedValue(invoiceRow)
+    Company.findByPk.mockResolvedValue({
+      id: '20f2cd5a-3418-4fd4-aec2-c7f9f0802111',
+      name: 'Demo Company',
+      ntn: '7654321',
+      strn: null,
+      address: null,
+      email: null,
+      phone: null,
+    })
+    getFileModifiedAtMs.mockResolvedValue(new Date('2026-04-10T12:00:00.000Z').getTime())
+
+    const token = buildAccessToken()
+    const res = await request(app)
+      .get('/api/v1/invoices/f4dc454d-5890-4a62-9859-4c7bea4b0111/pdf')
+      .set('Authorization', `Bearer ${token}`)
+
+    expect(res.statusCode).toBe(200)
+    expect(res.headers['content-type']).toContain('application/pdf')
+    expect(persistInvoicePdf).not.toHaveBeenCalled()
+  })
+
+  it('GET /api/v1/invoices/:id/pdf regenerates when cached PDF is stale', async () => {
+    const invoiceRow = buildInvoiceRow({
+      pdf_path: '/storage/pdfs/mock-company/mock-invoice.pdf',
+      updated_at: '2026-04-10T12:00:00.000Z',
+    })
+
+    Invoice.findOne.mockResolvedValue(invoiceRow)
+    Company.findByPk.mockResolvedValue({
+      id: '20f2cd5a-3418-4fd4-aec2-c7f9f0802111',
+      name: 'Demo Company',
+      ntn: '7654321',
+      strn: null,
+      address: null,
+      email: null,
+      phone: null,
+    })
+    getFileModifiedAtMs.mockResolvedValue(new Date('2026-04-10T09:00:00.000Z').getTime())
+
+    const token = buildAccessToken()
+    const res = await request(app)
+      .get('/api/v1/invoices/f4dc454d-5890-4a62-9859-4c7bea4b0111/pdf')
+      .set('Authorization', `Bearer ${token}`)
+
+    expect(res.statusCode).toBe(200)
+    expect(res.headers['content-type']).toContain('application/pdf')
+    expect(persistInvoicePdf).toHaveBeenCalledTimes(1)
+    expect(touchFile).toHaveBeenCalledWith('/tmp/mock-pdf.pdf')
   })
 })

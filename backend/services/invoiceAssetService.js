@@ -80,6 +80,28 @@ async function fileExists(filePath) {
   }
 }
 
+async function getFileModifiedAtMs(filePath) {
+  if (!filePath) {
+    return null
+  }
+
+  try {
+    const stat = await fs.promises.stat(filePath)
+    return Number.isFinite(stat.mtimeMs) ? stat.mtimeMs : null
+  } catch (_err) {
+    return null
+  }
+}
+
+async function touchFile(filePath) {
+  if (!filePath) {
+    return
+  }
+
+  const now = new Date()
+  await fs.promises.utimes(filePath, now, now)
+}
+
 async function persistInvoiceQrPng({ companyId, invoiceId, qrCodeData }) {
   const safeCompanyId = String(companyId || '').trim()
   const safeInvoiceId = String(invoiceId || '').trim()
@@ -311,4 +333,6 @@ module.exports = {
   persistInvoicePdf,
   resolveStorageAbsolutePath,
   fileExists,
+  getFileModifiedAtMs,
+  touchFile,
 }

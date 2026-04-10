@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   Bar,
   BarChart,
@@ -503,7 +503,7 @@ function DashboardPage() {
 
   function handleQuickAction(actionKey) {
     if (actionKey === 'create-invoice') {
-      setActionFeedback('Invoice module is planned in Phase 5. Quick action is staged.')
+      navigate('/invoices/new')
       return
     }
 
@@ -761,12 +761,12 @@ function DashboardPage() {
           <article className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-sm uppercase tracking-[0.2em] text-zinc-500">Recent Invoices</h2>
-              <a
-                href="/invoices"
+              <Link
+                to="/invoices"
                 className="text-xs text-zinc-400 underline-offset-2 hover:text-zinc-200 hover:underline"
               >
                 View all
-              </a>
+              </Link>
             </div>
 
             {recentInvoicesState.error ? (
@@ -808,7 +808,7 @@ function DashboardPage() {
                           <td className="rounded-r-lg px-3 py-3">
                             <button
                               type="button"
-                              onClick={() => setActionFeedback('Invoice detail page is planned in Phase 5.')}
+                              onClick={() => navigate(`/invoices/${invoice.id}`)}
                               className="rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:border-zinc-500"
                             >
                               View
@@ -831,12 +831,13 @@ function DashboardPage() {
             <article className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
               <div className="flex items-center justify-between gap-3">
                 <h2 className="text-sm uppercase tracking-[0.2em] text-zinc-500">FBR Status</h2>
-                <a
-                  href="/fbr/submissions"
+                <button
+                  type="button"
+                  onClick={() => setActionFeedback('FBR submission log page will be implemented in Phase 7.')}
                   className="text-xs text-zinc-400 underline-offset-2 hover:text-zinc-200 hover:underline"
                 >
                   Open log
-                </a>
+                </button>
               </div>
 
               {fbrStatusState.error ? (

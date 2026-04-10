@@ -104,3 +104,46 @@ export async function clientImportRequest(token, file) {
     },
   })
 }
+
+export async function invoicesListRequest(token, params = {}) {
+  return api.get('/invoices', {
+    ...authHeader(token),
+    params,
+  })
+}
+
+export async function invoiceDetailRequest(token, invoiceId) {
+  return api.get(`/invoices/${invoiceId}`, authHeader(token))
+}
+
+export async function createInvoiceRequest(token, payload) {
+  return api.post('/invoices', payload, authHeader(token))
+}
+
+export async function updateInvoiceRequest(token, invoiceId, payload) {
+  return api.put(`/invoices/${invoiceId}`, payload, authHeader(token))
+}
+
+export async function deleteInvoiceRequest(token, invoiceId) {
+  return api.delete(`/invoices/${invoiceId}`, authHeader(token))
+}
+
+export async function duplicateInvoiceRequest(token, invoiceId) {
+  return api.post(`/invoices/${invoiceId}/duplicate`, {}, authHeader(token))
+}
+
+export async function sendInvoiceRequest(token, invoiceId) {
+  return api.post(`/invoices/${invoiceId}/send`, {}, authHeader(token))
+}
+
+export async function cancelInvoiceRequest(token, invoiceId, payload = {}) {
+  return api.post(`/invoices/${invoiceId}/cancel`, payload, authHeader(token))
+}
+
+export async function invoicePdfRequest(token, invoiceId, params = {}) {
+  return api.get(`/invoices/${invoiceId}/pdf`, {
+    ...authHeader(token),
+    params,
+    responseType: 'blob',
+  })
+}

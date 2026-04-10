@@ -12,6 +12,8 @@ const {
   persistInvoicePdf,
   resolveStorageAbsolutePath,
   fileExists,
+  getFileModifiedAtMs,
+  touchFile,
 } = require('../services/invoiceAssetService')
 const {
   sequelize,
@@ -673,14 +675,26 @@ async function listInvoices(req, res, next) {
   ]
 
   const status = normalizeOptionalString(req.query.status)?.toLowerCase()
+  const fbrStatus = normalizeOptionalString(req.query.fbr_status)?.toLowerCase()
   const clientId = normalizeOptionalString(req.query.client_id)
   const sellerId = normalizeOptionalString(req.query.seller_id)
   const dateFrom = normalizeDateOnly(req.query.date_from)
   const dateTo = normalizeDateOnly(req.query.date_to)
   const search = normalizeOptionalString(req.query.search)
+  const fbrSubmittedFlag = ['1', 'true', 'yes'].includes(
+    String(req.query.fbr_submitted || '').trim().toLowerCase()
+  )
 
   if (status) {
     where.status = status
+  }
+
+  if (fbrStatus) {
+    where.fbr_status = fbrStatus
+  } else if (fbrSubmittedFlag) {
+    where.fbr_status = {
+      [Op.ne]: 'not_submitted',
+    }
   }
 
   if (clientId) {
@@ -1463,18 +1477,45 @@ async function getInvoicePdf(req, res, next) {
       qrCodeAbsolutePath = qrAsset?.absolutePath || resolveStorageAbsolutePath(invoice.qr_code_path)
     }
 
-    const pdfAsset = await persistInvoicePdf({
-      invoice,
-      company,
-      client: invoice.client,
-      items: invoice.items,
-      payments: invoice.payments,
-      qrCodeAbsolutePath,
-    })
+    const cachedPdfAbsolutePath = resolveStorageAbsolutePath(invoice.pdf_path)
+    const cachedPdfExists = await fileExists(cachedPdfAbsolutePath)
+    const invoiceUpdatedAtMs = Number.isNaN(new Date(invoice.updated_at).getTime())
+      ? null
+      : new Date(invoice.updated_at).getTime()
+    const cachedPdfModifiedAtMs = cachedPdfExists
+      ? await getFileModifiedAtMs(cachedPdfAbsolutePath)
+      : null
 
-    await invoice.update({
-      pdf_path: pdfAsset.publicPath,
-    })
+    const isCachedPdfFresh =
+      cachedPdfExists &&
+      cachedPdfModifiedAtMs !== null &&
+      (invoiceUpdatedAtMs === null || cachedPdfModifiedAtMs >= invoiceUpdatedAtMs)
+
+    let pdfAsset = null
+
+    if (isCachedPdfFresh) {
+      pdfAsset = {
+        absolutePath: cachedPdfAbsolutePath,
+        publicPath: invoice.pdf_path,
+      }
+    } else {
+      pdfAsset = await persistInvoicePdf({
+        invoice,
+        company,
+        client: invoice.client,
+        items: invoice.items,
+        payments: invoice.payments,
+        qrCodeAbsolutePath,
+      })
+
+      if (invoice.pdf_path !== pdfAsset.publicPath) {
+        await invoice.update({
+          pdf_path: pdfAsset.publicPath,
+        })
+      }
+
+      await touchFile(pdfAsset.absolutePath)
+    }
 
     const download = String(req.query.download || '').trim() === '1'
     const disposition = download ? 'attachment' : 'inline'

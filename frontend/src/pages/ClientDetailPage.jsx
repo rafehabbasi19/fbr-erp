@@ -86,7 +86,6 @@ function ClientDetailPage() {
 
   const [isLoading, setIsLoading] = useState(true)
   const [errorMessage, setErrorMessage] = useState('')
-  const [quickActionMessage, setQuickActionMessage] = useState('')
   const [payload, setPayload] = useState({
     client: null,
     invoice_summary: null,
@@ -217,7 +216,7 @@ function ClientDetailPage() {
             </button>
             <button
               type="button"
-              onClick={() => setQuickActionMessage('Invoice creation is planned in Phase 5 and will be linked here.')}
+              onClick={() => navigate(`/invoices/new?client_id=${clientId}`)}
               className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-emerald-950 transition hover:bg-emerald-400"
             >
               Create Invoice for this Client
@@ -230,12 +229,6 @@ function ClientDetailPage() {
             </Link>
           </div>
         </header>
-
-        {quickActionMessage ? (
-          <div className="mb-6 rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm text-zinc-300">
-            {quickActionMessage}
-          </div>
-        ) : null}
 
         <section className="mb-6 grid gap-4 md:grid-cols-3">
           <article className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
