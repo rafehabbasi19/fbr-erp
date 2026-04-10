@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import ErrorAlert from '../components/ErrorAlert'
 import { useAuth } from '../context/AuthContext'
 import {
+  deleteInvoiceRequest,
   invoicePdfRequest,
   invoicesListRequest,
   sendInvoiceRequest,
@@ -110,6 +111,7 @@ function InvoiceListPage() {
 
   const [selectedIds, setSelectedIds] = useState([])
   const [isSendingInvoiceId, setIsSendingInvoiceId] = useState('')
+  const [isDeletingInvoiceId, setIsDeletingInvoiceId] = useState('')
   const [isBulkDownloading, setIsBulkDownloading] = useState(false)
 
   const [reloadTick, setReloadTick] = useState(0)
@@ -271,6 +273,30 @@ function InvoiceListPage() {
       setActionError(getApiErrorMessage(error, 'Unable to send invoice right now.'))
     } finally {
       setIsSendingInvoiceId('')
+    }
+  }
+
+  async function handleDeleteInvoice(invoice) {
+    const confirmed = window.confirm(
+      `Delete draft invoice ${invoice.invoice_number}? This action cannot be undone.`
+    )
+
+    if (!confirmed) {
+      return
+    }
+
+    setActionError('')
+    setActionMessage('')
+    setIsDeletingInvoiceId(invoice.id)
+
+    try {
+      await deleteInvoiceRequest(accessToken, invoice.id)
+      setActionMessage(`Invoice ${invoice.invoice_number} deleted.`)
+      triggerReload()
+    } catch (error) {
+      setActionError(getApiErrorMessage(error, 'Unable to delete invoice right now.'))
+    } finally {
+      setIsDeletingInvoiceId('')
     }
   }
 
@@ -444,10 +470,20 @@ function InvoiceListPage() {
                             <button
                               type="button"
                               onClick={() => handleSendInvoice(invoice)}
-                              disabled={isSendingInvoiceId === invoice.id}
+                              disabled={isSendingInvoiceId === invoice.id || isDeletingInvoiceId === invoice.id}
                               className="rounded-md border border-emerald-500/40 px-2 py-1 text-xs text-emerald-200 hover:bg-emerald-500/15 disabled:cursor-not-allowed disabled:opacity-70"
                             >
                               {isSendingInvoiceId === invoice.id ? 'Sending...' : 'Send'}
+                            </button>
+                          ) : null}
+                          {invoice.status === 'draft' ? (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteInvoice(invoice)}
+                              disabled={isDeletingInvoiceId === invoice.id || isSendingInvoiceId === invoice.id}
+                              className="rounded-md border border-rose-500/40 px-2 py-1 text-xs text-rose-200 hover:bg-rose-500/15 disabled:cursor-not-allowed disabled:opacity-70"
+                            >
+                              {isDeletingInvoiceId === invoice.id ? 'Deleting...' : 'Delete'}
                             </button>
                           ) : null}
                         </div>

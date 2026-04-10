@@ -951,7 +951,11 @@ function InvoiceFormPage() {
                           />
                         ) : null}
                       </td>
-                      <td className="px-2 py-2 text-right text-zinc-300">{formatCurrency(line.lineTotal)}</td>
+                      <td className="px-2 py-2 text-right text-xs text-zinc-300 sm:text-sm">
+                        <span className="block max-w-[10rem] break-all text-right tabular-nums leading-tight">
+                          {formatCurrency(line.lineTotal)}
+                        </span>
+                      </td>
                       <td className="rounded-r-lg px-2 py-2">
                         <div className="flex gap-1">
                           <button
@@ -1040,17 +1044,23 @@ function InvoiceFormPage() {
               <h2 className="text-sm uppercase tracking-[0.16em] text-zinc-500">Totals</h2>
 
               <div className="mt-4 space-y-2 text-sm text-zinc-300">
-                <div className="flex items-center justify-between">
+                <div className="flex items-start justify-between gap-4">
                   <span>Subtotal</span>
-                  <span>{formatCurrency(totals.subtotal)}</span>
+                  <span className="max-w-[11rem] break-all text-right tabular-nums leading-tight">
+                    {formatCurrency(totals.subtotal)}
+                  </span>
                 </div>
-                <div className="flex items-center justify-between">
+                <div className="flex items-start justify-between gap-4">
                   <span>Discount</span>
-                  <span>- {formatCurrency(totals.discountAmount)}</span>
+                  <span className="max-w-[11rem] break-all text-right tabular-nums leading-tight">
+                    - {formatCurrency(totals.discountAmount)}
+                  </span>
                 </div>
-                <div className="flex items-center justify-between">
+                <div className="flex items-start justify-between gap-4">
                   <span>Tax</span>
-                  <span>{formatCurrency(totals.taxAmount)}</span>
+                  <span className="max-w-[11rem] break-all text-right tabular-nums leading-tight">
+                    {formatCurrency(totals.taxAmount)}
+                  </span>
                 </div>
                 {isPreviewLoading ? (
                   <p className="text-xs text-zinc-500">Recalculating tax preview...</p>
@@ -1058,9 +1068,11 @@ function InvoiceFormPage() {
               </div>
 
               <div className="mt-4 border-t border-zinc-700 pt-3">
-                <div className="flex items-center justify-between text-lg font-semibold text-zinc-100">
+                <div className="flex items-start justify-between gap-4 text-lg font-semibold text-zinc-100">
                   <span>Total</span>
-                  <span>{formatCurrency(totals.total)}</span>
+                  <span className="max-w-[11rem] break-all text-right tabular-nums leading-tight">
+                    {formatCurrency(totals.total)}
+                  </span>
                 </div>
               </div>
             </section>

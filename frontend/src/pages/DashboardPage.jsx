@@ -45,6 +45,10 @@ const CURRENCY_FORMATTER = new Intl.NumberFormat('en-PK', {
 })
 
 const NUMBER_FORMATTER = new Intl.NumberFormat('en-US')
+const COMPACT_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
+  notation: 'compact',
+  maximumFractionDigits: 1,
+})
 
 function formatCurrency(value) {
   return CURRENCY_FORMATTER.format(Number(value || 0))
@@ -52,6 +56,10 @@ function formatCurrency(value) {
 
 function formatNumber(value) {
   return NUMBER_FORMATTER.format(Number(value || 0))
+}
+
+function formatCompactNumber(value) {
+  return COMPACT_NUMBER_FORMATTER.format(Number(value || 0))
 }
 
 function formatDate(value) {
@@ -179,10 +187,10 @@ function statusBadgeClass(status) {
 
 function MetricCard({ icon, label, value, trend, loading }) {
   return (
-    <article className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-      <div className="flex items-start justify-between gap-4">
-        <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">{label}</p>
-        <span className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-300">
+    <article className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+      <div className="flex min-w-0 items-start justify-between gap-4">
+        <p className="min-w-0 text-xs uppercase tracking-[0.18em] text-zinc-500">{label}</p>
+        <span className="shrink-0 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-300">
           {icon}
         </span>
       </div>
@@ -190,7 +198,9 @@ function MetricCard({ icon, label, value, trend, loading }) {
       {loading ? (
         <div className="mt-4 h-8 w-2/3 animate-pulse rounded bg-zinc-800" />
       ) : (
-        <p className="mt-4 text-3xl font-semibold text-zinc-50">{value}</p>
+        <p className="mt-4 break-words text-[clamp(1.5rem,2.3vw,2.25rem)] font-semibold leading-tight text-zinc-50 tabular-nums">
+          {value}
+        </p>
       )}
 
       {trend ? (
@@ -592,7 +602,7 @@ function DashboardPage() {
         </section>
 
         <section className="mt-6 grid gap-6 xl:grid-cols-[2fr_1fr]">
-          <article className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+          <article className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-sm uppercase tracking-[0.2em] text-zinc-500">Revenue Chart</h2>
               <div className="flex flex-wrap gap-2">
@@ -664,19 +674,38 @@ function DashboardPage() {
                 <div className="h-full animate-pulse rounded-lg border border-zinc-800 bg-zinc-950" />
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartState.data} margin={{ top: 10, right: 24, left: 0, bottom: 8 }}>
+                  <BarChart data={chartState.data} margin={{ top: 12, right: 28, left: 12, bottom: 16 }}>
+                    <defs>
+                      <linearGradient id="revenueFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#2dd4bf" stopOpacity={0.95} />
+                        <stop offset="100%" stopColor="#0f766e" stopOpacity={0.7} />
+                      </linearGradient>
+                      <linearGradient id="invoiceLine" x1="0" y1="0" x2="1" y2="0">
+                        <stop offset="0%" stopColor="#f59e0b" />
+                        <stop offset="100%" stopColor="#fb7185" />
+                      </linearGradient>
+                    </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
                     <XAxis
                       dataKey="label"
                       stroke="#a1a1aa"
                       tickLine={false}
                       axisLine={{ stroke: '#3f3f46' }}
+                      tickMargin={12}
+                      interval={0}
+                      minTickGap={16}
+                      tick={{ fontSize: 12 }}
                     />
                     <YAxis
                       yAxisId="left"
                       stroke="#a1a1aa"
                       tickLine={false}
                       axisLine={{ stroke: '#3f3f46' }}
+                      width={86}
+                      tickMargin={10}
+                      allowDecimals={false}
+                      tickFormatter={value => formatCompactNumber(value)}
+                      tick={{ fontSize: 12 }}
                     />
                     <YAxis
                       yAxisId="right"
@@ -684,6 +713,10 @@ function DashboardPage() {
                       stroke="#a1a1aa"
                       tickLine={false}
                       axisLine={{ stroke: '#3f3f46' }}
+                      width={48}
+                      tickMargin={8}
+                      allowDecimals={false}
+                      tick={{ fontSize: 12 }}
                     />
                     <Tooltip
                       contentStyle={{
@@ -704,7 +737,7 @@ function DashboardPage() {
                     <Bar
                       yAxisId="left"
                       dataKey="revenue"
-                      fill="#14b8a6"
+                      fill="url(#revenueFill)"
                       radius={[6, 6, 0, 0]}
                       name="Revenue"
                     />
@@ -712,7 +745,7 @@ function DashboardPage() {
                       yAxisId="right"
                       type="monotone"
                       dataKey="invoice_count"
-                      stroke="#f59e0b"
+                      stroke="url(#invoiceLine)"
                       strokeWidth={2}
                       dot={{ r: 3 }}
                       name="Invoice Count"
@@ -828,7 +861,7 @@ function DashboardPage() {
           </article>
 
           <div className="space-y-6">
-            <article className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+            <article className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
               <div className="flex items-center justify-between gap-3">
                 <h2 className="text-sm uppercase tracking-[0.2em] text-zinc-500">FBR Status</h2>
                 <button
@@ -872,7 +905,7 @@ function DashboardPage() {
               </div>
             </article>
 
-            <article className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+            <article className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
               <h2 className="text-sm uppercase tracking-[0.2em] text-zinc-500">Recent Activity</h2>
 
               {recentActivityState.error ? (
@@ -891,8 +924,8 @@ function DashboardPage() {
                       ))
                   : recentActivityState.data.slice(0, 6).map(activity => (
                       <div key={activity.id} className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
-                        <p className="text-sm text-zinc-100">{activity.label}</p>
-                        <p className="mt-1 text-xs text-zinc-400">
+                        <p className="break-words text-sm text-zinc-100">{activity.label}</p>
+                        <p className="mt-1 break-words text-xs text-zinc-400">
                           {activity.actor_name} | {formatDateTime(activity.occurred_at)}
                         </p>
                       </div>

@@ -569,7 +569,12 @@ async function getRecentActivity(req, res, next) {
 
   try {
     const logs = await AuditLog.findAll({
-      where: scopedActivityWhere(user),
+      where: {
+        ...scopedActivityWhere(user),
+        action: {
+          [Op.notIn]: ['AUTH_TOKEN_REFRESHED'],
+        },
+      },
       attributes: ['id', 'action', 'entity_type', 'entity_id', 'created_at'],
       include: [
         {
