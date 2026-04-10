@@ -35,6 +35,23 @@ function readRowValue(row, key) {
   return row ? row[key] : undefined
 }
 
+async function sumPaymentsByInvoiceScope({ invoiceWhere, paymentDateWhere = null }) {
+  const totalPaid = await Payment.sum('Payment.amount_paid', {
+    where: paymentDateWhere ? { payment_date: paymentDateWhere } : undefined,
+    include: [
+      {
+        model: Invoice,
+        as: 'invoice',
+        attributes: [],
+        required: true,
+        where: invoiceWhere,
+      },
+    ],
+  })
+
+  return toNumber(totalPaid)
+}
+
 function toMonthKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
 }
@@ -232,50 +249,20 @@ async function getSummary(req, res, next) {
           payment_status: 'overdue',
         },
       }),
-      Payment.sum('amount_paid', {
-        where: {
-          payment_date: {
-            [Op.between]: [monthStartStr, nowStr],
-          },
+      sumPaymentsByInvoiceScope({
+        invoiceWhere,
+        paymentDateWhere: {
+          [Op.between]: [monthStartStr, nowStr],
         },
-        include: [
-          {
-            model: Invoice,
-            as: 'invoice',
-            attributes: [],
-            required: true,
-            where: invoiceWhere,
-          },
-        ],
       }),
-      Payment.sum('amount_paid', {
-        where: {
-          payment_date: {
-            [Op.between]: [yearStartStr, nowStr],
-          },
+      sumPaymentsByInvoiceScope({
+        invoiceWhere,
+        paymentDateWhere: {
+          [Op.between]: [yearStartStr, nowStr],
         },
-        include: [
-          {
-            model: Invoice,
-            as: 'invoice',
-            attributes: [],
-            required: true,
-            where: invoiceWhere,
-          },
-        ],
       }),
       Invoice.sum('total_amount', { where: invoiceWhere }),
-      Payment.sum('amount_paid', {
-        include: [
-          {
-            model: Invoice,
-            as: 'invoice',
-            attributes: [],
-            required: true,
-            where: invoiceWhere,
-          },
-        ],
-      }),
+      sumPaymentsByInvoiceScope({ invoiceWhere }),
       FbrSubmission.count({
         where: {
           status: 'pending',
@@ -510,7 +497,7 @@ async function getTopClients(req, res, next) {
       ? await Payment.findAll({
           attributes: [
             [col('invoice.client_id'), 'client_id'],
-            [fn('COALESCE', fn('SUM', col('amount_paid')), 0), 'total_paid'],
+            [fn('COALESCE', fn('SUM', col('Payment.amount_paid')), 0), 'total_paid'],
           ],
           include: [
             {

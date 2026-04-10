@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import ErrorAlert from '../components/ErrorAlert'
@@ -10,6 +10,7 @@ import {
   invoiceDetailRequest,
   sendInvoiceRequest,
   taxRatesListRequest,
+  taxRatesPreviewRequest,
   updateInvoiceRequest,
 } from '../services/authApi'
 import { getApiErrorMessage } from '../utils/errorMessage'
@@ -70,6 +71,67 @@ function buildClientOptionLabel(client) {
   return `${client.name} (${taxId})`
 }
 
+function normalizeTaxBreakdownRows(rows) {
+  if (!Array.isArray(rows)) {
+    return []
+  }
+
+  return rows.map(row => ({
+    name: String(row?.name || '').trim() || `${toNumber(row?.rate).toFixed(2)}%`,
+    rate: roundCurrency(row?.rate),
+    taxableAmount: roundCurrency(row?.taxable_amount),
+    taxAmount: roundCurrency(row?.tax_amount),
+  }))
+}
+
+function buildPreviewPayload(formState) {
+  return {
+    client_id: normalizeOptional(formState.client_id),
+    issue_date: normalizeOptional(formState.issue_date),
+    discount_type: formState.discount_type || null,
+    discount_value: roundCurrency(formState.discount_value),
+    items: formState.items.map((item, index) => ({
+      description: String(item.description || '').trim(),
+      quantity: toNumber(item.quantity),
+      unit: normalizeOptional(item.unit),
+      unit_price: roundCurrency(item.unit_price),
+      tax_rate_id: normalizeOptional(item.tax_rate_id),
+      tax_rate_percentage: roundCurrency(item.tax_rate_percentage),
+      sort_order: index,
+    })),
+  }
+}
+
+function canRunPreview(payload) {
+  if (!Array.isArray(payload?.items) || payload.items.length === 0) {
+    return false
+  }
+
+  return payload.items.every(item => {
+    if (!String(item.description || '').trim()) {
+      return false
+    }
+
+    if (!Number.isFinite(item.quantity) || item.quantity <= 0) {
+      return false
+    }
+
+    if (!Number.isFinite(item.unit_price) || item.unit_price < 0) {
+      return false
+    }
+
+    if (item.tax_rate_id) {
+      return true
+    }
+
+    return (
+      Number.isFinite(item.tax_rate_percentage) &&
+      item.tax_rate_percentage >= 0 &&
+      item.tax_rate_percentage <= 100
+    )
+  })
+}
+
 function statusBadgeClass(status) {
   const normalized = String(status || '').toLowerCase()
 
@@ -116,9 +178,22 @@ function InvoiceFormPage() {
   const [errors, setErrors] = useState({})
   const [serverMessage, setServerMessage] = useState('')
   const [taxRates, setTaxRates] = useState([])
+  const [previewResult, setPreviewResult] = useState(null)
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false)
   const [isLoadingInvoice, setIsLoadingInvoice] = useState(isEdit)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [dragIndex, setDragIndex] = useState(-1)
+  const previewRequestRef = useRef(0)
+
+  const previewPayload = useMemo(() => buildPreviewPayload(form), [form])
+  const previewEnabled = useMemo(() => canRunPreview(previewPayload), [previewPayload])
+
+  const previewLineByOrder = useMemo(() => {
+    const rows = Array.isArray(previewResult?.items) ? previewResult.items : []
+    return new Map(
+      rows.map(row => [Number(row.sort_order), row])
+    )
+  }, [previewResult])
 
   const selectedClient = useMemo(
     () => clients.find(client => client.id === form.client_id) || null,
@@ -151,8 +226,11 @@ function InvoiceFormPage() {
       const taxRate = toNumber(item.tax_rate_percentage)
 
       const baseAmount = roundCurrency(quantity * unitPrice)
-      const taxAmount = roundCurrency((baseAmount * taxRate) / 100)
-      const lineTotal = roundCurrency(baseAmount + taxAmount)
+      const fallbackTaxAmount = roundCurrency((baseAmount * taxRate) / 100)
+      const fallbackLineTotal = roundCurrency(baseAmount + fallbackTaxAmount)
+      const previewLine = previewLineByOrder.get(index)
+      const taxAmount = previewLine ? roundCurrency(previewLine.tax_amount) : fallbackTaxAmount
+      const lineTotal = previewLine ? roundCurrency(previewLine.line_total) : fallbackLineTotal
 
       return {
         index,
@@ -165,9 +243,19 @@ function InvoiceFormPage() {
         lineTotal,
       }
     })
-  }, [form.items])
+  }, [form.items, previewLineByOrder])
 
   const totals = useMemo(() => {
+    if (previewResult) {
+      return {
+        subtotal: roundCurrency(previewResult.subtotal),
+        taxAmount: roundCurrency(previewResult.total_tax),
+        discountAmount: roundCurrency(previewResult.discount_amount),
+        total: roundCurrency(previewResult.grand_total),
+        taxBreakdown: normalizeTaxBreakdownRows(previewResult.tax_breakdown),
+      }
+    }
+
     const subtotal = roundCurrency(lines.reduce((sum, line) => sum + line.baseAmount, 0))
     const taxAmount = roundCurrency(lines.reduce((sum, line) => sum + line.taxAmount, 0))
 
@@ -187,6 +275,7 @@ function InvoiceFormPage() {
 
       if (!accumulator[key]) {
         accumulator[key] = {
+          name: `${Number(key).toFixed(2)}%`,
           rate: Number(key),
           taxableAmount: 0,
           taxAmount: 0,
@@ -208,7 +297,44 @@ function InvoiceFormPage() {
       total,
       taxBreakdown,
     }
-  }, [form.discount_type, form.discount_value, lines])
+  }, [form.discount_type, form.discount_value, lines, previewResult])
+
+  useEffect(() => {
+    if (!accessToken || !previewEnabled) {
+      setPreviewResult(null)
+      setIsPreviewLoading(false)
+      return
+    }
+
+    const timeoutId = setTimeout(async () => {
+      const requestId = previewRequestRef.current + 1
+      previewRequestRef.current = requestId
+      setIsPreviewLoading(true)
+
+      try {
+        const response = await taxRatesPreviewRequest(accessToken, previewPayload)
+        if (previewRequestRef.current !== requestId) {
+          return
+        }
+
+        setPreviewResult(response.data?.data || null)
+      } catch (_error) {
+        if (previewRequestRef.current !== requestId) {
+          return
+        }
+
+        setPreviewResult(null)
+      } finally {
+        if (previewRequestRef.current === requestId) {
+          setIsPreviewLoading(false)
+        }
+      }
+    }, 400)
+
+    return () => {
+      clearTimeout(timeoutId)
+    }
+  }, [accessToken, previewEnabled, previewPayload])
 
   useEffect(() => {
     let isMounted = true
@@ -926,6 +1052,9 @@ function InvoiceFormPage() {
                   <span>Tax</span>
                   <span>{formatCurrency(totals.taxAmount)}</span>
                 </div>
+                {isPreviewLoading ? (
+                  <p className="text-xs text-zinc-500">Recalculating tax preview...</p>
+                ) : null}
               </div>
 
               <div className="mt-4 border-t border-zinc-700 pt-3">
@@ -940,8 +1069,8 @@ function InvoiceFormPage() {
               <h2 className="text-sm uppercase tracking-[0.16em] text-zinc-500">Tax Breakdown</h2>
               <div className="mt-3 space-y-2 text-sm text-zinc-300">
                 {totals.taxBreakdown.map(breakdown => (
-                  <div key={String(breakdown.rate)} className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
-                    <p className="text-zinc-100">{breakdown.rate.toFixed(2)}%</p>
+                  <div key={`${String(breakdown.name)}-${String(breakdown.rate)}`} className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+                    <p className="text-zinc-100">{breakdown.name}</p>
                     <p className="mt-1 text-xs text-zinc-400">Taxable: {formatCurrency(breakdown.taxableAmount)}</p>
                     <p className="mt-1 text-xs text-zinc-400">Tax: {formatCurrency(breakdown.taxAmount)}</p>
                   </div>

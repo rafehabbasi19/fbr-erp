@@ -199,25 +199,50 @@ async function persistInvoicePdf({
     const normalizedPayments = Array.isArray(payments) ? payments : []
     const taxBreakdown = buildTaxBreakdown(normalizedItems)
 
-    doc.fontSize(20).text('TAX INVOICE', { align: 'right' })
-    doc.moveDown(0.5)
+    const headerTopY = doc.y
+    const headerLeftWidth = pageWidth * 0.48
 
-    doc.fontSize(12).text(company?.name || 'Company', { continued: true }).fontSize(10).text('')
+    doc.font('Helvetica-Bold').fontSize(15).text(company?.name || 'Company', x, headerTopY, {
+      width: headerLeftWidth,
+      align: 'left',
+    })
+    doc.font('Helvetica').fontSize(9)
+
+    let headerMetaY = headerTopY + 20
+
     if (company?.address) {
-      doc.fontSize(10).text(company.address)
-    }
-    if (company?.email || company?.phone) {
-      doc
-        .fontSize(10)
-        .text([company?.email, company?.phone].filter(Boolean).join(' | '))
-    }
-    if (company?.ntn || company?.strn) {
-      doc
-        .fontSize(10)
-        .text([company?.ntn ? `NTN: ${company.ntn}` : null, company?.strn ? `STRN: ${company.strn}` : null].filter(Boolean).join(' | '))
+      doc.text(company.address, x, headerMetaY, { width: headerLeftWidth })
+      headerMetaY = doc.y + 2
     }
 
-    doc.moveDown(0.8)
+    if (company?.email || company?.phone) {
+      doc.text([company?.email, company?.phone].filter(Boolean).join(' | '), x, headerMetaY, {
+        width: headerLeftWidth,
+      })
+      headerMetaY = doc.y + 2
+    }
+
+    if (company?.ntn || company?.strn) {
+      doc.text(
+        [company?.ntn ? `NTN: ${company.ntn}` : null, company?.strn ? `STRN: ${company.strn}` : null]
+          .filter(Boolean)
+          .join(' | '),
+        x,
+        headerMetaY,
+        {
+          width: headerLeftWidth,
+        }
+      )
+      headerMetaY = doc.y + 2
+    }
+
+    doc.font('Helvetica-Bold').fontSize(20).text('TAX INVOICE', x + pageWidth * 0.55, headerTopY, {
+      width: pageWidth * 0.45,
+      align: 'right',
+    })
+
+    doc.y = Math.max(headerMetaY, headerTopY + 34)
+    doc.moveDown(0.4)
 
     doc
       .fontSize(11)

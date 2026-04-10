@@ -568,7 +568,7 @@ async function listClients(req, res, next) {
       paymentTotals = await Payment.findAll({
         attributes: [
           [col('invoice.client_id'), 'client_id'],
-          [fn('COALESCE', fn('SUM', col('amount_paid')), 0), 'total_paid'],
+          [fn('COALESCE', fn('SUM', col('Payment.amount_paid')), 0), 'total_paid'],
         ],
         include: [
           {
@@ -675,7 +675,7 @@ async function getClientById(req, res, next) {
       Invoice.sum('total_amount', {
         where: nonCancelledInvoiceWhere,
       }),
-      Payment.sum('amount_paid', {
+      Payment.sum('Payment.amount_paid', {
         include: [
           {
             model: Invoice,

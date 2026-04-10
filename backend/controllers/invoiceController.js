@@ -195,17 +195,20 @@ async function findScopedClient(companyId, clientId) {
   })
 }
 
-function buildQrCodeData({ invoiceNumber, issueDate, total, taxAmount, company, client }) {
-  return JSON.stringify({
-    v: '1',
-    inv: invoiceNumber,
-    seller_ntn: normalizeOptionalString(company?.ntn),
-    buyer_ntn: normalizeOptionalString(client?.ntn),
-    date: issueDate,
-    total: roundCurrency(total).toFixed(2),
-    tax: roundCurrency(taxAmount).toFixed(2),
-    fbr_usin: null,
-  })
+function buildInvoiceUrl({ invoiceId, invoiceNumber }) {
+  const configuredClientUrl = normalizeOptionalString(process.env.CLIENT_URL)
+
+  if (configuredClientUrl) {
+    const baseUrl = configuredClientUrl.replace(/\/+$/, '')
+    return `${baseUrl}/invoices/${encodeURIComponent(String(invoiceId || '').trim())}`
+  }
+
+  const fallbackIdentifier = String(invoiceNumber || invoiceId || '').trim()
+  return fallbackIdentifier ? `invoice:${fallbackIdentifier}` : 'invoice:unknown'
+}
+
+function buildQrCodeData({ invoiceId, invoiceNumber }) {
+  return buildInvoiceUrl({ invoiceId, invoiceNumber })
 }
 
 function serializeInvoiceItem(item) {
@@ -551,10 +554,6 @@ async function createInvoice(req, res, next) {
       })
     }
 
-    const company = await Company.findByPk(user.company_id, {
-      attributes: ['id', 'ntn'],
-    })
-
     const createdInvoiceId = await sequelize.transaction(async transaction => {
       const calculated = await calculateInvoiceAmounts({
         companyId: user.company_id,
@@ -598,14 +597,6 @@ async function createInvoice(req, res, next) {
           fbr_status: 'not_submitted',
           fbr_usin: null,
           fbr_invoice_number: null,
-          qr_code_data: buildQrCodeData({
-            invoiceNumber,
-            issueDate: payload.issue_date,
-            total: calculated.total,
-            taxAmount: calculated.tax_amount,
-            company,
-            client,
-          }),
           qr_code_path: null,
           qr_code_url: null,
           pdf_path: null,
@@ -633,6 +624,22 @@ async function createInvoice(req, res, next) {
         })),
         { transaction }
       )
+
+      const invoiceQrCodeData = buildQrCodeData({
+        invoiceId: invoiceRecord.id,
+        invoiceNumber: invoiceRecord.invoice_number,
+      })
+
+      if (typeof invoiceRecord.update === 'function') {
+        await invoiceRecord.update(
+          {
+            qr_code_data: invoiceQrCodeData,
+          },
+          { transaction }
+        )
+      } else {
+        invoiceRecord.qr_code_data = invoiceQrCodeData
+      }
 
       return invoiceRecord.id
     })
@@ -926,10 +933,6 @@ async function updateInvoice(req, res, next) {
       })
     }
 
-    const company = await Company.findByPk(user.company_id, {
-      attributes: ['id', 'ntn'],
-    })
-
     const updatedInvoiceId = await sequelize.transaction(async transaction => {
       const calculated = await calculateInvoiceAmounts({
         companyId: user.company_id,
@@ -965,12 +968,8 @@ async function updateInvoice(req, res, next) {
           notes: payload.notes,
           terms: payload.terms,
           qr_code_data: buildQrCodeData({
+            invoiceId: currentInvoice.id,
             invoiceNumber: currentInvoice.invoice_number,
-            issueDate: payload.issue_date,
-            total: calculated.total,
-            taxAmount: calculated.tax_amount,
-            company,
-            client,
           }),
         },
         { transaction }
@@ -1178,10 +1177,6 @@ async function duplicateInvoice(req, res, next) {
       sort_order: Number.isInteger(item.sort_order) ? item.sort_order : index,
     }))
 
-    const company = await Company.findByPk(user.company_id, {
-      attributes: ['id', 'ntn'],
-    })
-
     const duplicatedInvoiceId = await sequelize.transaction(async transaction => {
       const calculated = await calculateInvoiceAmounts({
         companyId: user.company_id,
@@ -1226,14 +1221,6 @@ async function duplicateInvoice(req, res, next) {
           fbr_usin: null,
           fbr_invoice_number: null,
           fbr_pos_id: null,
-          qr_code_data: buildQrCodeData({
-            invoiceNumber,
-            issueDate: duplicateIssueDate,
-            total: calculated.total,
-            taxAmount: calculated.tax_amount,
-            company,
-            client: source.client,
-          }),
           qr_code_path: null,
           qr_code_url: null,
           pdf_path: null,
@@ -1262,6 +1249,22 @@ async function duplicateInvoice(req, res, next) {
         })),
         { transaction }
       )
+
+      const duplicateQrCodeData = buildQrCodeData({
+        invoiceId: duplicatedInvoice.id,
+        invoiceNumber: duplicatedInvoice.invoice_number,
+      })
+
+      if (typeof duplicatedInvoice.update === 'function') {
+        await duplicatedInvoice.update(
+          {
+            qr_code_data: duplicateQrCodeData,
+          },
+          { transaction }
+        )
+      } else {
+        duplicatedInvoice.qr_code_data = duplicateQrCodeData
+      }
 
       return duplicatedInvoice.id
     })

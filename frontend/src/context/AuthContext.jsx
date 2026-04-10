@@ -1,41 +1,16 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 
 import {
+  clearStoredSession,
   loginRequest,
   logoutRequest,
+  readStoredSession,
   refreshRequest,
+  writeStoredSession,
 } from '../services/authApi'
 import { isTokenValid, parseJwtPayload } from '../utils/token'
 
-const STORAGE_KEY = 'fbr_auth_session'
-
 const AuthContext = createContext(null)
-
-function readSessionFromStorage() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) {
-      return null
-    }
-
-    const parsed = JSON.parse(raw)
-    if (!parsed || !parsed.accessToken || !parsed.refreshToken) {
-      return null
-    }
-
-    return parsed
-  } catch (_error) {
-    return null
-  }
-}
-
-function persistSession(session) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(session))
-}
-
-function clearStoredSession() {
-  localStorage.removeItem(STORAGE_KEY)
-}
 
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(null)
@@ -45,7 +20,7 @@ export function AuthProvider({ children }) {
     let isMounted = true
 
     async function bootstrap() {
-      const stored = readSessionFromStorage()
+      const stored = readStoredSession()
 
       if (!stored) {
         if (isMounted) {
@@ -76,7 +51,7 @@ export function AuthProvider({ children }) {
 
         if (isMounted) {
           setSession(nextSession)
-          persistSession(nextSession)
+          writeStoredSession(nextSession)
         }
       } catch (_error) {
         clearStoredSession()
@@ -92,8 +67,43 @@ export function AuthProvider({ children }) {
 
     bootstrap()
 
+    function handleAuthSessionChange(event) {
+      if (!isMounted) {
+        return
+      }
+
+      if (event?.detail === null) {
+        setSession(null)
+        return
+      }
+
+      if (event?.detail) {
+        setSession(event.detail)
+        return
+      }
+
+      setSession(readStoredSession())
+    }
+
+    function handleStorageChange(event) {
+      if (!isMounted || event.key !== 'fbr_auth_session') {
+        return
+      }
+
+      setSession(readStoredSession())
+    }
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('fbr-auth-session-changed', handleAuthSessionChange)
+      window.addEventListener('storage', handleStorageChange)
+    }
+
     return () => {
       isMounted = false
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('fbr-auth-session-changed', handleAuthSessionChange)
+        window.removeEventListener('storage', handleStorageChange)
+      }
     }
   }, [])
 
@@ -109,7 +119,7 @@ export function AuthProvider({ children }) {
     }
 
     setSession(nextSession)
-    persistSession(nextSession)
+    writeStoredSession(nextSession)
 
     return response
   }
@@ -142,7 +152,7 @@ export function AuthProvider({ children }) {
       role,
       accessToken: session?.accessToken || null,
       refreshToken: session?.refreshToken || null,
-      isAuthenticated: Boolean(session?.accessToken && isTokenValid(session.accessToken)),
+      isAuthenticated: Boolean(session?.accessToken && session?.refreshToken),
       isBootstrapping,
       login,
       logout,

@@ -69,15 +69,40 @@ function buildValidationErrors(form) {
 }
 
 function mapApiValidationErrors(apiErrors) {
-  return (apiErrors || []).reduce((accumulator, item) => {
-    const field = item?.field
+  const fieldAliases = {
+    ntn_num: 'ntn',
+    ntn_number: 'ntn',
+    client_ntn: 'ntn',
+    client_cnic: 'cnic',
+  }
 
-    if (field) {
-      accumulator[field] = item.message
-    }
+  if (Array.isArray(apiErrors)) {
+    return apiErrors.reduce((accumulator, item) => {
+      const rawField = String(item?.field || '').trim()
+      const field = fieldAliases[rawField] || rawField
 
-    return accumulator
-  }, {})
+      if (field) {
+        accumulator[field] = item.message
+      }
+
+      return accumulator
+    }, {})
+  }
+
+  if (apiErrors && typeof apiErrors === 'object') {
+    return Object.entries(apiErrors).reduce((accumulator, [rawField, rawMessage]) => {
+      const field = fieldAliases[rawField] || rawField
+      const message = Array.isArray(rawMessage) ? rawMessage[0] : rawMessage
+
+      if (field && message) {
+        accumulator[field] = String(message)
+      }
+
+      return accumulator
+    }, {})
+  }
+
+  return {}
 }
 
 function ClientFormPage() {
@@ -273,17 +298,24 @@ function ClientFormPage() {
     } catch (error) {
       const apiMessage = getApiErrorMessage(error, 'Unable to save client right now. Please try again.')
       const apiErrors = error?.response?.data?.errors
+      const responseMessage = String(error?.response?.data?.message || '')
+      const mappedErrors = mapApiValidationErrors(apiErrors)
 
-      if (Array.isArray(apiErrors) && apiErrors.length > 0) {
-        const mappedErrors = mapApiValidationErrors(apiErrors)
+      if (!mappedErrors.ntn && /\bntn\b/i.test(responseMessage) && /exist|duplicate|already/i.test(responseMessage)) {
+        mappedErrors.ntn = responseMessage
+      }
+
+      if (!mappedErrors.cnic && /\bcnic\b/i.test(responseMessage) && /exist|duplicate|already/i.test(responseMessage)) {
+        mappedErrors.cnic = responseMessage
+      }
+
+      if (Object.keys(mappedErrors).length > 0) {
         setErrors(current => ({
           ...current,
           ...mappedErrors,
         }))
 
-        if (Object.keys(mappedErrors).length > 0) {
-          scrollToFirstFieldError(mappedErrors, fieldRefs)
-        }
+        scrollToFirstFieldError(mappedErrors, fieldRefs)
       }
 
       setServerMessage(apiMessage)

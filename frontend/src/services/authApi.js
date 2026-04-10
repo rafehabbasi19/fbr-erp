@@ -1,9 +1,146 @@
 import axios from 'axios'
 
+const STORAGE_KEY = 'fbr_auth_session'
+
+const baseApi = axios.create({
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1',
+  timeout: 15000,
+})
+
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1',
   timeout: 15000,
 })
+
+let refreshInFlight = null
+
+function readStoredSession() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) {
+      return null
+    }
+
+    const parsed = JSON.parse(raw)
+    if (!parsed || !parsed.accessToken || !parsed.refreshToken) {
+      return null
+    }
+
+    return parsed
+  } catch (_error) {
+    return null
+  }
+}
+
+function dispatchSessionChange(session) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  window.dispatchEvent(new CustomEvent('fbr-auth-session-changed', { detail: session }))
+}
+
+function writeStoredSession(session) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(session))
+  dispatchSessionChange(session)
+}
+
+function clearStoredSession() {
+  localStorage.removeItem(STORAGE_KEY)
+  dispatchSessionChange(null)
+}
+
+async function refreshAccessToken() {
+  if (!refreshInFlight) {
+    const stored = readStoredSession()
+
+    if (!stored?.refreshToken) {
+      throw new Error('No refresh token available')
+    }
+
+    refreshInFlight = baseApi
+      .post('/auth/refresh', { refresh_token: stored.refreshToken })
+      .then(response => {
+        const data = response.data?.data
+
+        if (!data?.access_token || !data?.refresh_token) {
+          throw new Error('Invalid refresh response')
+        }
+
+        const nextSession = {
+          user: stored.user,
+          accessToken: data.access_token,
+          refreshToken: data.refresh_token,
+          expiresIn: data.expires_in,
+        }
+
+        writeStoredSession(nextSession)
+        return nextSession
+      })
+      .catch(error => {
+        const statusCode = error?.response?.status
+
+        if (statusCode === 401 || statusCode === 403) {
+          clearStoredSession()
+        }
+
+        throw error
+      })
+      .finally(() => {
+        refreshInFlight = null
+      })
+  }
+
+  return refreshInFlight
+}
+
+function shouldAttemptTokenRefresh(error) {
+  const statusCode = error?.response?.status
+  if (statusCode !== 401) {
+    return false
+  }
+
+  const message = String(error?.response?.data?.message || '').toLowerCase()
+  const errorCodes = Array.isArray(error?.response?.data?.errors)
+    ? error.response.data.errors.map(item => String(item?.code || '').toUpperCase())
+    : []
+
+  return (
+    message.includes('token expired') ||
+    message.includes('jwt has expired') ||
+    errorCodes.includes('TOKEN_EXPIRED')
+  )
+}
+
+api.interceptors.response.use(
+  response => response,
+  async error => {
+    const originalRequest = error.config
+
+    if (!originalRequest || originalRequest._retry || !shouldAttemptTokenRefresh(error)) {
+      return Promise.reject(error)
+    }
+
+    const requestUrl = String(originalRequest.url || '')
+    if (requestUrl.includes('/auth/refresh') || requestUrl.includes('/auth/login')) {
+      return Promise.reject(error)
+    }
+
+    originalRequest._retry = true
+
+    try {
+      const nextSession = await refreshAccessToken()
+      originalRequest.headers = {
+        ...(originalRequest.headers || {}),
+        Authorization: `Bearer ${nextSession.accessToken}`,
+      }
+
+      return api.request(originalRequest)
+    } catch (refreshError) {
+      return Promise.reject(refreshError)
+    }
+  }
+)
 
 function authHeader(token) {
   return {
@@ -14,27 +151,27 @@ function authHeader(token) {
 }
 
 export async function loginRequest(payload) {
-  return api.post('/auth/login', payload)
+  return baseApi.post('/auth/login', payload)
 }
 
 export async function registerRequest(payload) {
-  return api.post('/auth/register', payload)
+  return baseApi.post('/auth/register', payload)
 }
 
 export async function refreshRequest(payload) {
-  return api.post('/auth/refresh', payload)
+  return baseApi.post('/auth/refresh', payload)
 }
 
 export async function logoutRequest(payload, token) {
-  return api.post('/auth/logout', payload, authHeader(token))
+  return baseApi.post('/auth/logout', payload, authHeader(token))
 }
 
 export async function forgotPasswordRequest(payload) {
-  return api.post('/auth/forgot-password', payload)
+  return baseApi.post('/auth/forgot-password', payload)
 }
 
 export async function resetPasswordRequest(payload) {
-  return api.post('/auth/reset-password', payload)
+  return baseApi.post('/auth/reset-password', payload)
 }
 
 export async function dashboardSummaryRequest(token) {
@@ -157,4 +294,10 @@ export async function taxRatesListRequest(token, params = {}) {
 
 export async function taxRatesPreviewRequest(token, payload) {
   return api.post('/tax-rates/preview', payload, authHeader(token))
+}
+
+export {
+  clearStoredSession,
+  readStoredSession,
+  writeStoredSession,
 }
